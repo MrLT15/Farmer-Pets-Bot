@@ -19,6 +19,9 @@ const FARM_CHANNEL = "1270948980615938109";
 const LEADERBOARD_CHANNEL = "1499255526054170825";
 
 const ATOMIC_API = "https://wax.api.atomicassets.io/atomicassets/v1/assets";
+const FARMER_PETS_API = "https://pets-api-main.herokuapp.com";
+
+const CONTRACT_ACCOUNT = "farmerpetssc";
 
 const ROLES = {
   verified: "1499240994397356112",
@@ -44,6 +47,8 @@ let activeFarmEvent = null;
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
+
+// DATABASE
 
 async function initDatabase() {
   await pool.query(`
@@ -72,6 +77,8 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+
+  console.log("Farmer Pets database tables ready.");
 }
 
 async function getWallet(discordId) {
@@ -79,6 +86,7 @@ async function getWallet(discordId) {
     "SELECT wallet FROM verified_wallets WHERE discord_id = $1",
     [discordId]
   );
+
   return res.rows[0]?.wallet || null;
 }
 
@@ -134,12 +142,122 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
   );
 }
 
-async function getAssets(wallet) {
-  const url = `${ATOMIC_API}?owner=${wallet}&collection_name=farmerpetsgo&limit=1000`;
-  const res = await fetch(url);
-  const json = await res.json();
-  return json.data || [];
+// ASSET LOOKUP
+
+async function getJsonSafe(url) {
+  try {
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      console.log(`Fetch failed ${res.status}: ${url}`);
+      return [];
+    }
+
+    const json = await res.json();
+
+    if (Array.isArray(json)) return json;
+    if (Array.isArray(json.data)) return json.data;
+    if (Array.isArray(json.rows)) return json.rows;
+
+    return [];
+  } catch (error) {
+    console.log(`Failed to fetch ${url}:`, error.message);
+    return [];
+  }
 }
+
+async function getWalletAssets(wallet) {
+  const url =
+    `${ATOMIC_API}` +
+    `?owner=${wallet}` +
+    `&collection_name=farmerpetsgo` +
+    `&limit=1000`;
+
+  return await getJsonSafe(url);
+}
+
+function makePseudoAssetFromRow(row, source) {
+  const templateId =
+    row.template_id ||
+    row.templateId ||
+    row.template ||
+    row.templateid ||
+    "";
+
+  const name =
+    row.name ||
+    row.asset_name ||
+    row.template_name ||
+    row.schema_name ||
+    row.type ||
+    source;
+
+  return {
+    asset_id: row.asset_id || row.assetId || `${source}-${templateId}-${Math.random()}`,
+    name,
+    data: row,
+    template: {
+      template_id: String(templateId),
+      immutable_data: {
+        name
+      }
+    },
+    schema: {
+      schema_name: row.schema_name || row.schema || source
+    },
+    source
+  };
+}
+
+async function getStakedAssets(wallet) {
+  const urls = [
+    {
+      source: "tools",
+      url: `${FARMER_PETS_API}/api/rows/tools?scope=${CONTRACT_ACCOUNT}&user=${wallet}`
+    },
+    {
+      source: "lands",
+      url: `${FARMER_PETS_API}/api/rows/lands?scope=${CONTRACT_ACCOUNT}&user=${wallet}`
+    },
+    {
+      source: "pets",
+      url: `${FARMER_PETS_API}/api/rows/pets?user=${wallet}`
+    },
+    {
+      source: "items",
+      url: `${FARMER_PETS_API}/api/rows/items?user=${wallet}`
+    },
+    {
+      source: "solarpanels",
+      url: `${FARMER_PETS_API}/api/rows/solarpanels?user=${wallet}`
+    }
+  ];
+
+  const stakedAssets = [];
+
+  for (const item of urls) {
+    const rows = await getJsonSafe(item.url);
+
+    for (const row of rows) {
+      stakedAssets.push(makePseudoAssetFromRow(row, item.source));
+    }
+  }
+
+  return stakedAssets;
+}
+
+async function getAssets(wallet) {
+  const walletAssets = await getWalletAssets(wallet);
+  const stakedAssets = await getStakedAssets(wallet);
+
+  return {
+    walletAssets,
+    stakedAssets,
+    combinedAssets: [...walletAssets, ...stakedAssets]
+  };
+}
+
+// ROLE LOGIC
 
 function analyzeAssets(assets) {
   let food = 0;
@@ -148,19 +266,20 @@ function analyzeAssets(assets) {
   let tool = 0;
 
   for (const asset of assets) {
-    const name =
-      (asset.name || "") +
-      " " +
-      (asset.data?.name || "") +
-      " " +
-      (asset.template?.immutable_data?.name || "") +
-      " " +
-      (asset.schema?.schema_name || "");
+    const searchable =
+      `${asset.name || ""} ` +
+      `${asset.data?.name || ""} ` +
+      `${asset.data?.asset_name || ""} ` +
+      `${asset.data?.template_name || ""} ` +
+      `${asset.data?.type || ""} ` +
+      `${asset.template?.immutable_data?.name || ""} ` +
+      `${asset.schema?.schema_name || ""} ` +
+      `${asset.source || ""}`;
 
-    const lower = name.toLowerCase();
+    const lower = searchable.toLowerCase();
 
     if (lower.includes("food") || lower.includes("feed")) food++;
-    if (lower.includes("wood")) wood++;
+    if (lower.includes("wood") || lower.includes("lumber")) wood++;
     if (lower.includes("silver")) silver++;
 
     if (
@@ -221,7 +340,11 @@ function getSuccessChance(member) {
   return Math.min(chance, 0.75);
 }
 
+// FARM EVENTS
+
 async function startFarmEvent() {
+  if (activeFarmEvent) return;
+
   const roll = randomInt(1, 100);
 
   let name = "🐛 Pest Swarm";
@@ -250,8 +373,8 @@ async function startFarmEvent() {
 
   await channel.send(
     `${name}\n\n` +
-      `Farmers have **60 seconds** to run **/fp-rescue**\n\n` +
-      `Reward: **${min}-${max} $NKFE**`
+    `Farmers have **60 seconds** to run **/fp-rescue**\n\n` +
+    `Reward: **${min}-${max} $NKFE**`
   );
 
   setTimeout(() => {
@@ -261,7 +384,11 @@ async function startFarmEvent() {
 }
 
 function scheduleEvent() {
-  const delay = randomInt(2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000);
+  const delay = randomInt(
+    2 * 60 * 60 * 1000,
+    4 * 60 * 60 * 1000
+  );
+
   console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
 
   setTimeout(() => {
@@ -271,17 +398,26 @@ function scheduleEvent() {
 
 async function handleRescue(interaction) {
   if (!activeFarmEvent) {
-    await interaction.reply({ content: "No active farm emergency.", ephemeral: true });
+    await interaction.reply({
+      content: "No active farm emergency.",
+      ephemeral: true
+    });
     return;
   }
 
   if (Date.now() > activeFarmEvent.expires) {
-    await interaction.reply({ content: "This farm emergency has already ended.", ephemeral: true });
+    await interaction.reply({
+      content: "This farm emergency has already ended.",
+      ephemeral: true
+    });
     return;
   }
 
   if (activeFarmEvent.players.has(interaction.user.id)) {
-    await interaction.reply({ content: "You already attempted this rescue.", ephemeral: true });
+    await interaction.reply({
+      content: "You already attempted this rescue.",
+      ephemeral: true
+    });
     return;
   }
 
@@ -296,15 +432,24 @@ async function handleRescue(interaction) {
   }
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
+
   await ensurePlayer(interaction.user.id, wallet);
 
   const successChance = getSuccessChance(member);
   const success = Math.random() < successChance;
-  const reward = success ? randomInt(activeFarmEvent.rewardMin, activeFarmEvent.rewardMax) : 0;
+  const reward = success
+    ? randomInt(activeFarmEvent.rewardMin, activeFarmEvent.rewardMax)
+    : 0;
 
   activeFarmEvent.players.add(interaction.user.id);
 
-  await recordRescue(interaction.user.id, wallet, activeFarmEvent.name, success, reward);
+  await recordRescue(
+    interaction.user.id,
+    wallet,
+    activeFarmEvent.name,
+    success,
+    reward
+  );
 
   await interaction.reply({
     content: success
@@ -321,6 +466,8 @@ async function handleRescue(interaction) {
       : `🛡 **FARM RESCUE FAILED**\n\nFarmer: **${member.displayName}**\nEvent: **${activeFarmEvent.name}**`
   );
 }
+
+// STATS / LEADERBOARD
 
 async function buildStatsMessage(discordId, displayName) {
   const wallet = await getWallet(discordId);
@@ -397,8 +544,8 @@ async function postWeeklyLeaderboardAndReset() {
 
   await channel.send(
     `${leaderboard}\n\n` +
-      `💰 **Total Farmer Pets NKFE Owed:** ${totalPayout} $NKFE\n\n` +
-      `Use **/fp-payouts** for the manual payout list.`
+    `💰 **Total Farmer Pets NKFE Owed:** ${totalPayout} $NKFE\n\n` +
+    `Use **/fp-payouts** for the manual payout list.`
   );
 
   await pool.query(`
@@ -409,6 +556,8 @@ async function postWeeklyLeaderboardAndReset() {
         updated_at = NOW();
   `);
 }
+
+// COMMANDS
 
 const commands = [
   new SlashCommandBuilder()
@@ -449,9 +598,13 @@ client.once("ready", async () => {
   await initDatabase();
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
-  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
-    body: commands
-  });
+
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
+
+  console.log("Farmer Pets slash commands registered.");
 
   scheduleEvent();
 
@@ -485,23 +638,27 @@ client.on("interactionCreate", async interaction => {
       const wallet = await getWallet(interaction.user.id);
 
       if (!wallet) {
-        await interaction.editReply("Verify your wallet first using the GetRight Games verification bot.");
+        await interaction.editReply(
+          "Verify your wallet first using the GetRight Games verification bot."
+        );
         return;
       }
 
-      const assets = await getAssets(wallet);
-      const analysis = analyzeAssets(assets);
+      const assetData = await getAssets(wallet);
+      const analysis = analyzeAssets(assetData.combinedAssets);
       const member = await interaction.guild.members.fetch(interaction.user.id);
 
       await syncRoles(member, analysis);
 
       await interaction.editReply(
         `🌾 Farmer Pets roles updated.\n\n` +
-          `NFTs Found: **${analysis.total}**\n` +
-          `🥫 Food: **${analysis.food}**\n` +
-          `🪵 Wood: **${analysis.wood}**\n` +
-          `🥈 Silver: **${analysis.silver}**\n` +
-          `🛠️ Tools: **${analysis.tool}**`
+        `Wallet NFTs Found: **${assetData.walletAssets.length}**\n` +
+        `Staked/In-Game Assets Found: **${assetData.stakedAssets.length}**\n` +
+        `Total Assets Evaluated: **${analysis.total}**\n\n` +
+        `🥫 Food: **${analysis.food}**\n` +
+        `🪵 Wood: **${analysis.wood}**\n` +
+        `🥈 Silver: **${analysis.silver}**\n` +
+        `🛠️ Tools: **${analysis.tool}**`
       );
       return;
     }
@@ -509,13 +666,21 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "fp-stats") {
       const member = await interaction.guild.members.fetch(interaction.user.id);
       const message = await buildStatsMessage(interaction.user.id, member.displayName);
-      await interaction.reply({ content: message, ephemeral: true });
+
+      await interaction.reply({
+        content: message,
+        ephemeral: true
+      });
       return;
     }
 
     if (interaction.commandName === "fp-leaderboard") {
       const message = await buildLeaderboardMessage();
-      await interaction.reply({ content: message, ephemeral: false });
+
+      await interaction.reply({
+        content: message,
+        ephemeral: false
+      });
       return;
     }
 
@@ -528,7 +693,10 @@ client.on("interactionCreate", async interaction => {
       `);
 
       if (!res.rows.length) {
-        await interaction.reply({ content: "No Farmer Pets NKFE payouts owed right now.", ephemeral: true });
+        await interaction.reply({
+          content: "No Farmer Pets NKFE payouts owed right now.",
+          ephemeral: true
+        });
         return;
       }
 
@@ -562,12 +730,19 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "fp-testevent") {
       if (activeFarmEvent) {
-        await interaction.reply({ content: "A Farmer Pets event is already active.", ephemeral: true });
+        await interaction.reply({
+          content: "A Farmer Pets event is already active.",
+          ephemeral: true
+        });
         return;
       }
 
       await startFarmEvent();
-      await interaction.reply({ content: "Test Farmer Pets event started.", ephemeral: true });
+
+      await interaction.reply({
+        content: "Test Farmer Pets event started.",
+        ephemeral: true
+      });
       return;
     }
   } catch (error) {
@@ -576,7 +751,10 @@ client.on("interactionCreate", async interaction => {
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply("Something went wrong.");
     } else {
-      await interaction.reply({ content: "Something went wrong.", ephemeral: true });
+      await interaction.reply({
+        content: "Something went wrong.",
+        ephemeral: true
+      });
     }
   }
 });
