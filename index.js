@@ -17,42 +17,22 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 const FARM_CHANNEL = "1270948980615938109";
 const LEADERBOARD_CHANNEL = "1499255526054170825";
-
 const FARMER_VERIFIED_ROLE = "1499240994397356112";
 
 const ATOMIC_API = "https://wax.api.atomicassets.io/atomicassets/v1/assets";
 const FARMER_PETS_API = "https://pets-api-main.herokuapp.com";
 const CONTRACT_ACCOUNT = "farmerpetssc";
 
+const FLAGS_EPHEMERAL = 64;
+
 const ROLES = {
-  verified: {
-    id: "1499240994397356112",
-    name: "🌱 Farmer Pets Verified"
-  },
-  food: {
-    id: "1499241227097477171",
-    name: "🥫 Pet Food Producer"
-  },
-  wood: {
-    id: "1499241359146487838",
-    name: "🪵 Wood Gatherer"
-  },
-  silver: {
-    id: "1499241567016189972",
-    name: "🥈 Silver Miner"
-  },
-  tool: {
-    id: "1499240639655579881",
-    name: "🛠️ Farm Tool Holder"
-  },
-  workingFarm: {
-    id: "1499242211928182905",
-    name: "🚜 Working Farm"
-  },
-  fullFarm: {
-    id: "1499242342937399508",
-    name: "🏭 Full Farm Operator"
-  }
+  verified: { id: "1499240994397356112", name: "🌱 Farmer Pets Verified" },
+  food: { id: "1499241227097477171", name: "🥫 Pet Food Producer" },
+  wood: { id: "1499241359146487838", name: "🪵 Wood Gatherer" },
+  silver: { id: "1499241567016189972", name: "🥈 Silver Miner" },
+  tool: { id: "1499240639655579881", name: "🛠️ Farm Tool Holder" },
+  workingFarm: { id: "1499242211928182905", name: "🚜 Working Farm" },
+  fullFarm: { id: "1499242342937399508", name: "🏭 Full Farm Operator" }
 };
 
 const pool = new Pool({
@@ -220,9 +200,7 @@ function makePseudoAssetFromRow(row, source) {
     data: row,
     template: {
       template_id: String(templateId),
-      immutable_data: {
-        name
-      }
+      immutable_data: { name }
     },
     schema: {
       schema_name: row.schema_name || row.schema || source
@@ -456,7 +434,7 @@ async function handleRescue(interaction) {
   if (!activeFarmEvent) {
     await interaction.reply({
       content: "No active farm emergency.",
-      ephemeral: true
+      flags: FLAGS_EPHEMERAL
     });
     return;
   }
@@ -464,7 +442,7 @@ async function handleRescue(interaction) {
   if (Date.now() > activeFarmEvent.expires) {
     await interaction.reply({
       content: "This farm emergency has already ended.",
-      ephemeral: true
+      flags: FLAGS_EPHEMERAL
     });
     return;
   }
@@ -472,7 +450,7 @@ async function handleRescue(interaction) {
   if (activeFarmEvent.players.has(interaction.user.id)) {
     await interaction.reply({
       content: "You already attempted this rescue.",
-      ephemeral: true
+      flags: FLAGS_EPHEMERAL
     });
     return;
   }
@@ -482,7 +460,7 @@ async function handleRescue(interaction) {
   if (!wallet) {
     await interaction.reply({
       content: "You must verify your wallet first using `/verify`.",
-      ephemeral: true
+      flags: FLAGS_EPHEMERAL
     });
     return;
   }
@@ -511,7 +489,7 @@ async function handleRescue(interaction) {
     content: success
       ? `🌾 Farm Rescue Success!\n\nReward: **${reward} $NKFE**`
       : "🛡 Rescue Failed.",
-    ephemeral: true
+    flags: FLAGS_EPHEMERAL
   });
 
   const channel = await client.channels.fetch(FARM_CHANNEL);
@@ -689,7 +667,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "fp-roles") {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: FLAGS_EPHEMERAL });
 
       const wallet = await getWallet(interaction.user.id);
 
@@ -726,7 +704,7 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply({
         content: message,
-        ephemeral: true
+        flags: FLAGS_EPHEMERAL
       });
       return;
     }
@@ -735,8 +713,7 @@ client.on("interactionCreate", async interaction => {
       const message = await buildLeaderboardMessage();
 
       await interaction.reply({
-        content: message,
-        ephemeral: false
+        content: message
       });
       return;
     }
@@ -752,7 +729,7 @@ client.on("interactionCreate", async interaction => {
       if (!res.rows.length) {
         await interaction.reply({
           content: "No Farmer Pets NKFE payouts owed right now.",
-          ephemeral: true
+          flags: FLAGS_EPHEMERAL
         });
         return;
       }
@@ -766,7 +743,7 @@ client.on("interactionCreate", async interaction => {
           "💰 **Farmer Pets Manual Payout List**\n\n" +
           lines.join("\n") +
           "\n\nAfter manual payment, run `/fp-resetpayouts`.",
-        ephemeral: true
+        flags: FLAGS_EPHEMERAL
       });
       return;
     }
@@ -780,7 +757,7 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply({
         content: "Farmer Pets payout balances reset to 0. Lifetime stats were preserved.",
-        ephemeral: true
+        flags: FLAGS_EPHEMERAL
       });
       return;
     }
@@ -789,7 +766,7 @@ client.on("interactionCreate", async interaction => {
       if (activeFarmEvent) {
         await interaction.reply({
           content: "A Farmer Pets event is already active.",
-          ephemeral: true
+          flags: FLAGS_EPHEMERAL
         });
         return;
       }
@@ -798,20 +775,24 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply({
         content: "Test Farmer Pets event started.",
-        ephemeral: true
+        flags: FLAGS_EPHEMERAL
       });
       return;
     }
   } catch (error) {
     console.error(error);
 
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply("Something went wrong.");
-    } else {
-      await interaction.reply({
-        content: "Something went wrong.",
-        ephemeral: true
-      });
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply("Something went wrong.");
+      } else {
+        await interaction.reply({
+          content: "Something went wrong.",
+          flags: FLAGS_EPHEMERAL
+        });
+      }
+    } catch {
+      console.log("Could not send error reply to interaction.");
     }
   }
 });
