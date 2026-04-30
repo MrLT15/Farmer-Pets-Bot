@@ -304,7 +304,7 @@ const commands = [
 
 ].map(c => c.toJSON());
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
 
   console.log(`Farmer Pets Bot running`);
 
