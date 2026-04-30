@@ -1,13 +1,14 @@
 {
   "name": "farmer-pets-discord-bot",
   "version": "1.0.0",
-  "description": "Standalone Farmer Pets role and mini-game bot for GetRight Games Discord",
+  "description": "Standalone Farmer Pets role and mini-game bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.17.3",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "node-cron": "^3.0.3"
   }
 }
