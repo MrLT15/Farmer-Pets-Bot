@@ -407,7 +407,7 @@ async function startFarmEvent() {
     `${pingRole}\n\n` +
       `${name}\n\n` +
       `🚨 **A Farm Emergency has started!**\n\n` +
-      `Farmers have **60 seconds** to run **/fp-rescue**\n\n` +
+      `Farmers have **5 minutes** to run **/fp-rescue**\n\n` +
       `Reward: **${min}-${max} $NKFE**`
   );
 
