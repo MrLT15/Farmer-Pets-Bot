@@ -629,32 +629,44 @@ const commands = [
 client.once("clientReady", async () => {
   console.log(`Farmer Pets Bot online as ${client.user.tag}`);
 
-  await initDatabase();
+  try {
+    await initDatabase();
 
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
+    const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
 
-  console.log("Farmer Pets slash commands registered.");
+    console.log("Farmer Pets slash commands registered.");
 
-  scheduleEvent();
+    scheduleEvent();
 
-  cron.schedule(
-    "0 17 * * 0",
-    async () => {
-      try {
-        await postWeeklyLeaderboardAndReset();
-      } catch (error) {
-        console.error("Failed to post weekly Farmer Pets leaderboard:", error);
-      }
-    },
-    { timezone: "America/Los_Angeles" }
-  );
+    cron.schedule(
+      "0 17 * * 0",
+      async () => {
+        try {
+          await postWeeklyLeaderboardAndReset();
+        } catch (error) {
+          console.error("Failed to post weekly Farmer Pets leaderboard:", error);
+        }
+      },
+      { timezone: "America/Los_Angeles" }
+    );
 
-  console.log("Weekly Farmer Pets leaderboard scheduled for Sundays at 5:00 PM Pacific.");
+    console.log("Weekly Farmer Pets leaderboard scheduled for Sundays at 5:00 PM Pacific.");
+  } catch (error) {
+    console.error("Failed during Farmer Pets startup:", error);
+
+    if (error?.code === "28000") {
+      console.error(
+        "PostgreSQL authentication failed. Check DATABASE_URL on Render and ensure the database role is allowed to log in."
+      );
+    }
+
+    process.exit(1);
+  }
 });
 
 client.on("interactionCreate", async interaction => {
