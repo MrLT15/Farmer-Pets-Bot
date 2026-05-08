@@ -31,12 +31,14 @@ const FLAGS_EPHEMERAL = 64;
 const FARM_EVENT_DURATION_MS = 5 * 60 * 1000;
 const ATOMIC_ASSET_PAGE_LIMIT = 1000;
 const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
+const HELP_FARM_BUTTON_CUSTOM_ID = "fp-help-farm-button";
 const PACIFIC_TIME_ZONE = "America/Los_Angeles";
 const COMMUNITY_EVENT_CHANCE = 25;
 const COMMUNITY_GOAL_MIN = 3;
 const COMMUNITY_GOAL_MAX = 8;
 const COMMUNITY_BONUS_MIN = 2;
 const COMMUNITY_BONUS_MAX = 6;
+const COMMUNITY_HELPS_PER_PROGRESS = 3;
 const EMBED_COLORS = {
   success: 0x2ecc71,
   warning: 0xf1c40f,
@@ -559,7 +561,7 @@ function buildFarmEventEmbed(farmEvent) {
     },
     {
       name: "🎮 How to Join",
-      value: "Run `/fp-rescue` or press **Rescue Pet** below.",
+      value: "Run `/fp-rescue`, press **Rescue Pet**, or press **Help the Farm** after your attempt.",
       inline: false
     }
   ];
@@ -570,6 +572,8 @@ function buildFarmEventEmbed(farmEvent) {
       value:
         `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
         `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues\n` +
+        `Farmhand Help: **${farmEvent.communityHelps || 0}** help(s); every ` +
+        `**${COMMUNITY_HELPS_PER_PROGRESS}** helps adds +1 progress.\n` +
         `Server milestone reward: **${farmEvent.communityBonus} $NKFE** for every verified participant if the goal is met.`,
       inline: false
     });
@@ -605,7 +609,8 @@ function buildRescueResultEmbed({ member, farmEvent, success, reward, successCha
       name: "🤝 Co-op Progress",
       value:
         `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
-        `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+        `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues\n` +
+        `Farmhand Help: **${farmEvent.communityHelps || 0}** help(s)`,
       inline: false
     });
   }
@@ -653,7 +658,8 @@ function buildCommunityEventEndEmbed(farmEvent, rewardedCount) {
         name: "Final Progress",
         value:
           `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
-          `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+          `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues\n` +
+          `Farmhand Help: **${farmEvent.communityHelps || 0}** help(s)`,
         inline: false
       },
       {
@@ -669,6 +675,43 @@ function buildCommunityEventEndEmbed(farmEvent, rewardedCount) {
         inline: true
       }
     )
+    .setTimestamp();
+}
+
+function buildFarmHelpEmbed({ member, farmEvent, progressAdded }) {
+  const fields = [
+    { name: "Farmhand", value: `**${member.displayName}**`, inline: true },
+    { name: "Event", value: farmEvent.name, inline: true }
+  ];
+
+  if (farmEvent.isCommunity) {
+    fields.push(
+      {
+        name: "Farmhand Help",
+        value:
+          `Total Helps: **${farmEvent.communityHelps || 0}**\n` +
+          `Every **${COMMUNITY_HELPS_PER_PROGRESS}** helps adds +1 community progress.`,
+        inline: true
+      },
+      {
+        name: "Community Progress",
+        value:
+          `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+          `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+        inline: false
+      }
+    );
+  }
+
+  return new EmbedBuilder()
+    .setColor(progressAdded ? EMBED_COLORS.success : EMBED_COLORS.info)
+    .setTitle(progressAdded ? "🧑‍🌾 Farmhand Help Added Progress!" : "🧑‍🌾 Farmhand Help Added!")
+    .setDescription(
+      progressAdded
+        ? `${member.displayName} helped the farm and added **+1** community progress!`
+        : `${member.displayName} helped gather supplies, repair fences, and rally the farm.`
+    )
+    .addFields(fields)
     .setTimestamp();
 }
 
@@ -715,6 +758,12 @@ function buildRescueButtonRow(disabled = false) {
       .setLabel(disabled ? "Event Ended" : "Rescue Pet")
       .setStyle(ButtonStyle.Success)
       .setEmoji("🌾")
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId(HELP_FARM_BUTTON_CUSTOM_ID)
+      .setLabel(disabled ? "Help Closed" : "Help the Farm")
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji("🧑‍🌾")
       .setDisabled(disabled)
   );
 }
@@ -833,6 +882,7 @@ async function startFarmEvent() {
     rewardMax: max,
     expires: Date.now() + FARM_EVENT_DURATION_MS,
     players: new Set(),
+    helpers: new Set(),
     timeout: null,
     channel: null,
     message: null,
@@ -840,6 +890,7 @@ async function startFarmEvent() {
     isCommunity,
     communityGoal: isCommunity ? randomInt(COMMUNITY_GOAL_MIN, COMMUNITY_GOAL_MAX) : 0,
     communitySuccesses: 0,
+    communityHelps: 0,
     communityBonus: isCommunity ? randomInt(COMMUNITY_BONUS_MIN, COMMUNITY_BONUS_MAX) : 0,
     goalAnnounced: false,
     milestoneAwarded: false
@@ -1010,6 +1061,98 @@ async function handleRescue(interaction) {
   }
 }
 
+
+async function handleFarmHelp(interaction) {
+  const farmEvent = activeFarmEvent;
+
+  if (!farmEvent) {
+    await interaction.reply({
+      content: "No active farm emergency.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  if (Date.now() > farmEvent.expires) {
+    await interaction.reply({
+      content: "This farm emergency has already ended.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  if (farmEvent.helpers.has(interaction.user.id)) {
+    await interaction.reply({
+      content: "You already helped the farm during this event.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  const farmHelpWallet = await getWallet(interaction.user.id);
+
+  if (!farmHelpWallet) {
+    await interaction.reply({
+      content: "No verified wallet found. Please verify your wallet first using `/verify`.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  if (!farmEvent.players.has(interaction.user.id)) {
+    await interaction.reply({
+      content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  const farmHelpMember = await interaction.guild.members.fetch(interaction.user.id);
+  await ensurePlayer(interaction.user.id, farmHelpWallet);
+
+  farmEvent.helpers.add(interaction.user.id);
+
+  let progressAdded = false;
+
+  if (farmEvent.isCommunity) {
+    farmEvent.communityHelps++;
+
+    if (
+      farmEvent.communityHelps % COMMUNITY_HELPS_PER_PROGRESS === 0 &&
+      farmEvent.communitySuccesses < farmEvent.communityGoal
+    ) {
+      farmEvent.communitySuccesses++;
+      progressAdded = true;
+    }
+
+    await updateFarmEventMessage(farmEvent);
+    await announceCommunityGoalReached(farmEvent);
+  }
+
+  const helpEmbed = buildFarmHelpEmbed({
+    member: farmHelpMember,
+    farmEvent,
+    progressAdded
+  });
+
+  const updated = updateRes.rows[0];
+
+  await interaction.reply({
+    embeds: [helpEmbed],
+    flags: FLAGS_EPHEMERAL
+  });
+
+  try {
+    const target = getEventAnnouncementTarget(farmEvent);
+
+    if (target?.isTextBased()) {
+      await target.send({ embeds: [helpEmbed] });
+    }
+  } catch (error) {
+    console.error("Failed to announce Farmer Pets farmhand help:", error);
+  }
+}
+
 // STATS / LEADERBOARD
 
 async function handleDailyCheckIn(interaction) {
@@ -1027,8 +1170,7 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  const dailyCheckInRow = currentRes.rows[0] || {};
-  const lastDailyCheckIn = dailyCheckInRow.last_daily_checkin_key;
+  await ensurePlayer(interaction.user.id, wallet);
 
   const currentRes = await pool.query(
     `
@@ -1320,6 +1462,12 @@ client.on("interactionCreate", async interaction => {
     if (interaction.isButton()) {
       if (interaction.customId === RESCUE_BUTTON_CUSTOM_ID) {
         await handleRescue(interaction);
+        return;
+      }
+
+      if (interaction.customId === HELP_FARM_BUTTON_CUSTOM_ID) {
+        await handleFarmHelp(interaction);
+        return;
       }
 
       return;
