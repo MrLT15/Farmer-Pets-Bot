@@ -1027,7 +1027,8 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  await ensurePlayer(interaction.user.id, wallet);
+  const current = currentRes.rows[0] || {};
+  const lastDailyCheckIn = current.last_daily_checkin_key;
 
   const currentRes = await pool.query(
     `
@@ -1040,15 +1041,24 @@ async function handleDailyCheckIn(interaction) {
     [interaction.user.id]
   );
 
+<<<<<<< codex/review-the-code-xrhf61
   const dailyCheckInRow = currentRes.rows[0] || {};
   const lastDailyCheckIn = dailyCheckInRow.last_daily_checkin_key;
+=======
+  const current = currentRes.rows[0] || {};
+  const lastDailyCheckIn = current.last_daily_checkin_key;
+>>>>>>> main
 
   if (lastDailyCheckIn === todayKey) {
     await interaction.reply({
       embeds: [buildAlreadyCheckedInEmbed({
         displayName: member.displayName,
         lastDailyCheckIn,
+<<<<<<< codex/review-the-code-xrhf61
         streak: Number(dailyCheckInRow.daily_streak || 0)
+=======
+        streak: Number(current.daily_streak || 0)
+>>>>>>> main
       })],
       flags: FLAGS_EPHEMERAL
     });
@@ -1056,7 +1066,11 @@ async function handleDailyCheckIn(interaction) {
   }
 
   const streak = lastDailyCheckIn === yesterdayKey
+<<<<<<< codex/review-the-code-xrhf61
     ? Number(dailyCheckInRow.daily_streak || 0) + 1
+=======
+    ? Number(current.daily_streak || 0) + 1
+>>>>>>> main
     : 1;
   const reward = calculateDailyReward(streak);
 
