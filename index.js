@@ -795,7 +795,8 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  await ensurePlayer(interaction.user.id, wallet);
+    if (!wallet) {
+      farmEvent.players.delete(interaction.user.id);
 
   const currentRes = await pool.query(
     `
