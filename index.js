@@ -1093,7 +1093,7 @@ async function handleFarmHelp(interaction) {
 
   if (!farmHelpWallet) {
     await interaction.reply({
-      content: "You must verify your wallet first using `/verify`.",
+      content: "No verified wallet found. Please verify your wallet first using `/verify`.",
       flags: FLAGS_EPHEMERAL
     });
     return;
@@ -1134,6 +1134,8 @@ async function handleFarmHelp(interaction) {
     farmEvent,
     progressAdded
   });
+
+  const updated = updateRes.rows[0];
 
   await interaction.reply({
     embeds: [helpEmbed],
