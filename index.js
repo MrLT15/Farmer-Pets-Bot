@@ -32,6 +32,11 @@ const FARM_EVENT_DURATION_MS = 5 * 60 * 1000;
 const ATOMIC_ASSET_PAGE_LIMIT = 1000;
 const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
 const PACIFIC_TIME_ZONE = "America/Los_Angeles";
+const COMMUNITY_EVENT_CHANCE = 25;
+const COMMUNITY_GOAL_MIN = 3;
+const COMMUNITY_GOAL_MAX = 8;
+const COMMUNITY_BONUS_MIN = 2;
+const COMMUNITY_BONUS_MAX = 6;
 const EMBED_COLORS = {
   success: 0x2ecc71,
   warning: 0xf1c40f,
@@ -103,6 +108,20 @@ function calculateDailyReward(streak) {
     streakBonus,
     total: base + streakBonus
   };
+}
+
+function makeProgressBar(current, goal, width = 10) {
+  const safeGoal = Math.max(Number(goal || 0), 1);
+  const filled = Math.min(
+    width,
+    Math.floor((Number(current || 0) / safeGoal) * width)
+  );
+
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+function getEventAnnouncementTarget(farmEvent) {
+  return farmEvent.thread || farmEvent.channel || null;
 }
 
 // DATABASE
@@ -204,6 +223,24 @@ async function ensurePlayer(discordId, wallet) {
     `,
     [discordId, wallet]
   );
+}
+
+async function awardCommunityMilestoneReward(discordIds, reward) {
+  if (!discordIds.length || reward <= 0) return 0;
+
+  const res = await pool.query(
+    `
+    UPDATE farmerpets_balances
+    SET payout_nkfe = payout_nkfe + $2,
+        lifetime_nkfe = lifetime_nkfe + $2,
+        weekly_nkfe = weekly_nkfe + $2,
+        updated_at = NOW()
+    WHERE discord_id = ANY($1::text[]);
+    `,
+    [discordIds, reward]
+  );
+
+  return res.rowCount;
 }
 
 async function recordRescue(discordId, wallet, eventName, success, reward) {
@@ -509,27 +546,44 @@ function getSuccessChance(member) {
 }
 
 function buildFarmEventEmbed(farmEvent) {
+  const fields = [
+    {
+      name: "⏳ Time Limit",
+      value: "5 minutes",
+      inline: true
+    },
+    {
+      name: "💰 Rescue Reward",
+      value: `${farmEvent.rewardMin}-${farmEvent.rewardMax} $NKFE`,
+      inline: true
+    },
+    {
+      name: "🎮 How to Join",
+      value: "Run `/fp-rescue` or press **Rescue Pet** below.",
+      inline: false
+    }
+  ];
+
+  if (farmEvent.isCommunity) {
+    fields.splice(2, 0, {
+      name: "🤝 Community Goal",
+      value:
+        `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+        `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues\n` +
+        `Server milestone reward: **${farmEvent.communityBonus} $NKFE** for every verified participant if the goal is met.`,
+      inline: false
+    });
+  }
+
   return new EmbedBuilder()
-    .setColor(EMBED_COLORS.farm)
+    .setColor(farmEvent.isCommunity ? EMBED_COLORS.info : EMBED_COLORS.farm)
     .setTitle(farmEvent.name)
-    .setDescription("🚨 A Farm Emergency has started!")
-    .addFields(
-      {
-        name: "⏳ Time Limit",
-        value: "5 minutes",
-        inline: true
-      },
-      {
-        name: "💰 Reward",
-        value: `${farmEvent.rewardMin}-${farmEvent.rewardMax} $NKFE`,
-        inline: true
-      },
-      {
-        name: "🎮 How to Join",
-        value: "Run `/fp-rescue` or press **Rescue Pet** below.",
-        inline: false
-      }
+    .setDescription(
+      farmEvent.isCommunity
+        ? "🤝 A co-op Farm Emergency has started! Work together to hit the server goal."
+        : "🚨 A Farm Emergency has started!"
     )
+    .addFields(fields)
     .setFooter({ text: "Farmer Pets Rescue Event" })
     .setTimestamp();
 }
@@ -537,6 +591,24 @@ function buildFarmEventEmbed(farmEvent) {
 function buildRescueResultEmbed({ member, farmEvent, success, reward, successChance, streak }) {
   const currentStreak = Number(streak?.current_rescue_streak || 0);
   const bestStreak = Number(streak?.best_rescue_streak || 0);
+  const fields = [
+    { name: "Farmer", value: `**${member.displayName}**`, inline: true },
+    { name: "Event", value: farmEvent.name, inline: true },
+    { name: "Success Chance", value: formatPercent(successChance), inline: true },
+    { name: "Reward", value: `${reward} $NKFE`, inline: true },
+    { name: "Current Streak", value: `${currentStreak}`, inline: true },
+    { name: "Best Streak", value: `${bestStreak}`, inline: true }
+  ];
+
+  if (farmEvent.isCommunity) {
+    fields.push({
+      name: "🤝 Co-op Progress",
+      value:
+        `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+        `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+      inline: false
+    });
+  }
 
   return new EmbedBuilder()
     .setColor(success ? EMBED_COLORS.success : EMBED_COLORS.danger)
@@ -546,13 +618,56 @@ function buildRescueResultEmbed({ member, farmEvent, success, reward, successCha
         ? `${member.displayName} rescued a pet and earned **${reward} $NKFE**.`
         : `${member.displayName} could not complete this rescue.`
     )
+    .addFields(fields)
+    .setTimestamp();
+}
+
+function buildCommunityGoalReachedEmbed(farmEvent) {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.success)
+    .setTitle("🎉 Community Goal Reached!")
+    .setDescription(
+      `Farmers hit **${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues for **${farmEvent.name}**!`
+    )
+    .addFields({
+      name: "Server Milestone Reward",
+      value: `Every verified participant will receive **${farmEvent.communityBonus} $NKFE** when the event ends.`,
+      inline: false
+    })
+    .setTimestamp();
+}
+
+function buildCommunityEventEndEmbed(farmEvent, rewardedCount) {
+  const goalMet = farmEvent.communitySuccesses >= farmEvent.communityGoal;
+
+  return new EmbedBuilder()
+    .setColor(goalMet ? EMBED_COLORS.success : EMBED_COLORS.warning)
+    .setTitle(goalMet ? "🏆 Co-op Farm Event Complete" : "🌾 Co-op Farm Event Ended")
+    .setDescription(
+      goalMet
+        ? `The server completed **${farmEvent.name}** and unlocked the milestone reward!`
+        : `The server made progress on **${farmEvent.name}**, but the milestone goal was not reached this time.`
+    )
     .addFields(
-      { name: "Farmer", value: `**${member.displayName}**`, inline: true },
-      { name: "Event", value: farmEvent.name, inline: true },
-      { name: "Success Chance", value: formatPercent(successChance), inline: true },
-      { name: "Reward", value: `${reward} $NKFE`, inline: true },
-      { name: "Current Streak", value: `${currentStreak}`, inline: true },
-      { name: "Best Streak", value: `${bestStreak}`, inline: true }
+      {
+        name: "Final Progress",
+        value:
+          `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+          `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+        inline: false
+      },
+      {
+        name: "Participants",
+        value: `**${farmEvent.players.size}** verified farmer(s) joined`,
+        inline: true
+      },
+      {
+        name: "Milestone Reward",
+        value: goalMet
+          ? `**${rewardedCount}** farmer(s) received **${farmEvent.communityBonus} $NKFE**.`
+          : "No milestone reward this time.",
+        inline: true
+      }
     )
     .setTimestamp();
 }
@@ -593,14 +708,96 @@ function buildAlreadyCheckedInEmbed({ displayName, lastDailyCheckIn, streak }) {
 
 // FARM EVENTS
 
-function buildRescueButtonRow() {
+function buildRescueButtonRow(disabled = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(RESCUE_BUTTON_CUSTOM_ID)
-      .setLabel("Rescue Pet")
+      .setLabel(disabled ? "Event Ended" : "Rescue Pet")
       .setStyle(ButtonStyle.Success)
       .setEmoji("🌾")
+      .setDisabled(disabled)
   );
+}
+
+async function createEventThread(message, farmEvent) {
+  try {
+    if (!message?.startThread) return null;
+
+    return await message.startThread({
+      name: farmEvent.isCommunity
+        ? `🤝 ${farmEvent.name}`
+        : `🌾 ${farmEvent.name}`,
+      autoArchiveDuration: 60,
+      reason: "Farmer Pets event thread"
+    });
+  } catch (error) {
+    console.error("Failed to create Farmer Pets event thread:", error);
+    return null;
+  }
+}
+
+async function updateFarmEventMessage(farmEvent) {
+  try {
+    if (!farmEvent.message?.editable) return;
+
+    await farmEvent.message.edit({
+      content: `<@&${FARMER_VERIFIED_ROLE}>`,
+      embeds: [buildFarmEventEmbed(farmEvent)],
+      components: [buildRescueButtonRow()]
+    });
+  } catch (error) {
+    console.error("Failed to update Farmer Pets event message:", error);
+  }
+}
+
+async function closeFarmEventMessage(farmEvent) {
+  try {
+    if (!farmEvent.message?.editable) return;
+
+    await farmEvent.message.edit({
+      embeds: [buildFarmEventEmbed(farmEvent)],
+      components: [buildRescueButtonRow(true)]
+    });
+  } catch (error) {
+    console.error("Failed to close Farmer Pets event message:", error);
+  }
+}
+
+async function announceCommunityGoalReached(farmEvent) {
+  if (!farmEvent.isCommunity || farmEvent.goalAnnounced) return;
+  if (farmEvent.communitySuccesses < farmEvent.communityGoal) return;
+
+  farmEvent.goalAnnounced = true;
+
+  const target = getEventAnnouncementTarget(farmEvent);
+  if (!target?.isTextBased()) return;
+
+  await target.send({ embeds: [buildCommunityGoalReachedEmbed(farmEvent)] });
+}
+
+async function endFarmEvent(farmEvent) {
+  if (activeFarmEvent === farmEvent) {
+    activeFarmEvent = null;
+  }
+
+  await closeFarmEventMessage(farmEvent);
+
+  if (!farmEvent.isCommunity) return;
+
+  let rewardedCount = 0;
+
+  if (farmEvent.communitySuccesses >= farmEvent.communityGoal && !farmEvent.milestoneAwarded) {
+    farmEvent.milestoneAwarded = true;
+    rewardedCount = await awardCommunityMilestoneReward(
+      [...farmEvent.players],
+      farmEvent.communityBonus
+    );
+  }
+
+  const target = getEventAnnouncementTarget(farmEvent);
+  if (target?.isTextBased()) {
+    await target.send({ embeds: [buildCommunityEventEndEmbed(farmEvent, rewardedCount)] });
+  }
 }
 
 async function startFarmEvent() {
@@ -622,13 +819,30 @@ async function startFarmEvent() {
     max = 10;
   }
 
+  const isCommunity = randomInt(1, 100) <= COMMUNITY_EVENT_CHANCE;
+
+  if (isCommunity) {
+    name = `🤝 Co-op ${name.replace(/^\S+\s*/, "")}`;
+    min += 1;
+    max += 2;
+  }
+
   const farmEvent = {
     name,
     rewardMin: min,
     rewardMax: max,
     expires: Date.now() + FARM_EVENT_DURATION_MS,
     players: new Set(),
-    timeout: null
+    timeout: null,
+    channel: null,
+    message: null,
+    thread: null,
+    isCommunity,
+    communityGoal: isCommunity ? randomInt(COMMUNITY_GOAL_MIN, COMMUNITY_GOAL_MAX) : 0,
+    communitySuccesses: 0,
+    communityBonus: isCommunity ? randomInt(COMMUNITY_BONUS_MIN, COMMUNITY_BONUS_MAX) : 0,
+    goalAnnounced: false,
+    milestoneAwarded: false
   };
 
   activeFarmEvent = farmEvent;
@@ -642,18 +856,30 @@ async function startFarmEvent() {
 
     const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
 
-    await channel.send({
+    farmEvent.channel = channel;
+    farmEvent.message = await channel.send({
       content: pingRole,
       embeds: [buildFarmEventEmbed(farmEvent)],
       components: [buildRescueButtonRow()]
     });
+    farmEvent.thread = await createEventThread(farmEvent.message, farmEvent);
+
+    if (farmEvent.thread?.isTextBased()) {
+      try {
+        await farmEvent.thread.send(
+          farmEvent.isCommunity
+            ? "🤝 Use this thread to coordinate the co-op rescue and cheer farmers on!"
+            : "🌾 Rescue discussion thread is open for this farm event."
+        );
+      } catch (error) {
+        console.error("Failed to send Farmer Pets event thread intro:", error);
+      }
+    }
 
     farmEvent.timeout = setTimeout(() => {
-      if (activeFarmEvent === farmEvent) {
-        activeFarmEvent = null;
-      }
-
-      scheduleEvent();
+      endFarmEvent(farmEvent)
+        .catch(error => console.error("Failed to end Farmer Pets event:", error))
+        .finally(() => scheduleEvent());
     }, FARM_EVENT_DURATION_MS);
 
     return true;
@@ -744,6 +970,12 @@ async function handleRescue(interaction) {
       reward
     );
 
+    if (farmEvent.isCommunity && success) {
+      farmEvent.communitySuccesses++;
+      await updateFarmEventMessage(farmEvent);
+      await announceCommunityGoalReached(farmEvent);
+    }
+
     attemptRecorded = true;
 
     const resultEmbed = buildRescueResultEmbed({
@@ -761,10 +993,10 @@ async function handleRescue(interaction) {
     });
 
     try {
-      const channel = await client.channels.fetch(FARM_CHANNEL);
+      const target = getEventAnnouncementTarget(farmEvent);
 
-      if (channel?.isTextBased()) {
-        await channel.send({ embeds: [resultEmbed] });
+      if (target?.isTextBased()) {
+        await target.send({ embeds: [resultEmbed] });
       }
     } catch (error) {
       console.error("Failed to announce Farmer Pets rescue result:", error);
@@ -795,8 +1027,8 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-    if (!wallet) {
-      farmEvent.players.delete(interaction.user.id);
+  const current = currentRes.rows[0] || {};
+  const lastDailyCheckIn = current.last_daily_checkin_key;
 
   const currentRes = await pool.query(
     `
