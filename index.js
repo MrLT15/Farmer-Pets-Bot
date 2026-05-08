@@ -4,7 +4,11 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const { Pool } = require("pg");
@@ -24,6 +28,22 @@ const FARMER_PETS_API = "https://pets-api-main.herokuapp.com";
 const CONTRACT_ACCOUNT = "farmerpetssc";
 
 const FLAGS_EPHEMERAL = 64;
+const FARM_EVENT_DURATION_MS = 5 * 60 * 1000;
+const ATOMIC_ASSET_PAGE_LIMIT = 1000;
+const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
+const PACIFIC_TIME_ZONE = "America/Los_Angeles";
+const COMMUNITY_EVENT_CHANCE = 25;
+const COMMUNITY_GOAL_MIN = 3;
+const COMMUNITY_GOAL_MAX = 8;
+const COMMUNITY_BONUS_MIN = 2;
+const COMMUNITY_BONUS_MAX = 6;
+const EMBED_COLORS = {
+  success: 0x2ecc71,
+  warning: 0xf1c40f,
+  danger: 0xe74c3c,
+  info: 0x3498db,
+  farm: 0x8bc34a
+};
 
 const ROLES = {
   verified: { id: "1499240994397356112", name: "🌱 Farmer Pets Verified" },
@@ -50,9 +70,65 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-US");
+}
+
+function formatPercent(value) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function getPacificDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PACIFIC_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts
+      .filter(part => part.type !== "literal")
+      .map(part => [part.type, part.value])
+  );
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getYesterdayPacificDateKey() {
+  return getPacificDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+}
+
+function calculateDailyReward(streak) {
+  const base = randomInt(1, 3);
+  const streakBonus = streak > 0 && streak % 7 === 0 ? 5 : 0;
+
+  return {
+    base,
+    streakBonus,
+    total: base + streakBonus
+  };
+}
+
+function makeProgressBar(current, goal, width = 10) {
+  const safeGoal = Math.max(Number(goal || 0), 1);
+  const filled = Math.min(
+    width,
+    Math.floor((Number(current || 0) / safeGoal) * width)
+  );
+
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+function getEventAnnouncementTarget(farmEvent) {
+  return farmEvent.thread || farmEvent.channel || null;
+}
+
 // DATABASE
 
 async function initDatabase() {
+  await validateRequiredTables();
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS farmerpets_balances (
       discord_id TEXT PRIMARY KEY,
@@ -64,8 +140,22 @@ async function initDatabase() {
       weekly_nkfe INTEGER NOT NULL DEFAULT 0,
       weekly_successes INTEGER NOT NULL DEFAULT 0,
       weekly_attempts INTEGER NOT NULL DEFAULT 0,
+      daily_streak INTEGER NOT NULL DEFAULT 0,
+      best_daily_streak INTEGER NOT NULL DEFAULT 0,
+      last_daily_checkin DATE,
+      current_rescue_streak INTEGER NOT NULL DEFAULT 0,
+      best_rescue_streak INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE farmerpets_balances
+      ADD COLUMN IF NOT EXISTS daily_streak INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS best_daily_streak INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS last_daily_checkin DATE,
+      ADD COLUMN IF NOT EXISTS current_rescue_streak INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS best_rescue_streak INTEGER NOT NULL DEFAULT 0;
   `);
 
   await pool.query(`
@@ -81,6 +171,37 @@ async function initDatabase() {
   `);
 
   console.log("Farmer Pets database tables ready.");
+}
+
+async function validateRequiredTables() {
+  const tableRes = await pool.query(
+    "SELECT to_regclass('public.verified_wallets') AS verified_wallets"
+  );
+
+  if (!tableRes.rows[0]?.verified_wallets) {
+    throw new Error(
+      "Missing required table public.verified_wallets. This bot depends on an existing wallet verification table with discord_id and wallet columns."
+    );
+  }
+
+  const columnRes = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'verified_wallets'
+      AND column_name = ANY($1::text[]);
+  `, [["discord_id", "wallet"]]);
+
+  const columns = new Set(columnRes.rows.map(row => row.column_name));
+  const missingColumns = ["discord_id", "wallet"].filter(
+    column => !columns.has(column)
+  );
+
+  if (missingColumns.length) {
+    throw new Error(
+      `Table public.verified_wallets is missing required column(s): ${missingColumns.join(", ")}.`
+    );
+  }
 }
 
 async function getWallet(discordId) {
@@ -104,6 +225,24 @@ async function ensurePlayer(discordId, wallet) {
   );
 }
 
+async function awardCommunityMilestoneReward(discordIds, reward) {
+  if (!discordIds.length || reward <= 0) return 0;
+
+  const res = await pool.query(
+    `
+    UPDATE farmerpets_balances
+    SET payout_nkfe = payout_nkfe + $2,
+        lifetime_nkfe = lifetime_nkfe + $2,
+        weekly_nkfe = weekly_nkfe + $2,
+        updated_at = NOW()
+    WHERE discord_id = ANY($1::text[]);
+    `,
+    [discordIds, reward]
+  );
+
+  return res.rowCount;
+}
+
 async function recordRescue(discordId, wallet, eventName, success, reward) {
   await pool.query(
     `
@@ -113,7 +252,9 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
     [discordId, wallet, eventName, success, reward]
   );
 
-  await pool.query(
+  const rescueStreak = success ? 1 : 0;
+
+  const res = await pool.query(
     `
     INSERT INTO farmerpets_balances (
       discord_id,
@@ -125,9 +266,11 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
       weekly_nkfe,
       weekly_successes,
       weekly_attempts,
+      current_rescue_streak,
+      best_rescue_streak,
       updated_at
     )
-    VALUES ($1, $2, $3, $3, $4, 1, $3, $4, 1, NOW())
+    VALUES ($1, $2, $3, $3, $4, 1, $3, $4, 1, $5, $5, NOW())
     ON CONFLICT (discord_id)
     DO UPDATE SET
       wallet = EXCLUDED.wallet,
@@ -138,10 +281,24 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
       weekly_nkfe = farmerpets_balances.weekly_nkfe + EXCLUDED.weekly_nkfe,
       weekly_successes = farmerpets_balances.weekly_successes + EXCLUDED.weekly_successes,
       weekly_attempts = farmerpets_balances.weekly_attempts + 1,
-      updated_at = NOW();
+      current_rescue_streak = CASE
+        WHEN $4 = 1 THEN farmerpets_balances.current_rescue_streak + 1
+        ELSE 0
+      END,
+      best_rescue_streak = CASE
+        WHEN $4 = 1 THEN GREATEST(
+          farmerpets_balances.best_rescue_streak,
+          farmerpets_balances.current_rescue_streak + 1
+        )
+        ELSE farmerpets_balances.best_rescue_streak
+      END,
+      updated_at = NOW()
+    RETURNING current_rescue_streak, best_rescue_streak;
     `,
-    [discordId, wallet, reward, success ? 1 : 0]
+    [discordId, wallet, reward, success ? 1 : 0, rescueStreak]
   );
+
+  return res.rows[0];
 }
 
 // ASSETS
@@ -151,8 +308,7 @@ async function getJsonSafe(url) {
     const res = await fetch(url);
 
     if (!res.ok) {
-      console.log(`Fetch failed ${res.status}: ${url}`);
-      return [];
+      throw new Error(`Fetch failed ${res.status}: ${url}`);
     }
 
     const json = await res.json();
@@ -163,19 +319,31 @@ async function getJsonSafe(url) {
 
     return [];
   } catch (error) {
-    console.log(`Failed to fetch ${url}:`, error.message);
-    return [];
+    throw new Error(`Failed to fetch ${url}: ${error.message}`);
   }
 }
 
 async function getWalletAssets(wallet) {
-  const url =
-    `${ATOMIC_API}` +
-    `?owner=${wallet}` +
-    `&collection_name=farmerpetsgo` +
-    `&limit=1000`;
+  const assets = [];
+  let page = 1;
 
-  return await getJsonSafe(url);
+  while (true) {
+    const params = new URLSearchParams({
+      owner: wallet,
+      collection_name: "farmerpetsgo",
+      limit: String(ATOMIC_ASSET_PAGE_LIMIT),
+      page: String(page)
+    });
+
+    const pageAssets = await getJsonSafe(`${ATOMIC_API}?${params.toString()}`);
+    assets.push(...pageAssets);
+
+    if (pageAssets.length < ATOMIC_ASSET_PAGE_LIMIT) break;
+
+    page++;
+  }
+
+  return assets;
 }
 
 function makePseudoAssetFromRow(row, source) {
@@ -209,27 +377,33 @@ function makePseudoAssetFromRow(row, source) {
   };
 }
 
+function buildRowsUrl(table, params) {
+  const query = new URLSearchParams(params).toString();
+
+  return `${FARMER_PETS_API}/api/rows/${table}?${query}`;
+}
+
 async function getStakedAssets(wallet) {
   const urls = [
     {
       source: "tools",
-      url: `${FARMER_PETS_API}/api/rows/tools?scope=${CONTRACT_ACCOUNT}&user=${wallet}`
+      url: buildRowsUrl("tools", { scope: CONTRACT_ACCOUNT, user: wallet })
     },
     {
       source: "lands",
-      url: `${FARMER_PETS_API}/api/rows/lands?scope=${CONTRACT_ACCOUNT}&user=${wallet}`
+      url: buildRowsUrl("lands", { scope: CONTRACT_ACCOUNT, user: wallet })
     },
     {
       source: "pets",
-      url: `${FARMER_PETS_API}/api/rows/pets?user=${wallet}`
+      url: buildRowsUrl("pets", { user: wallet })
     },
     {
       source: "items",
-      url: `${FARMER_PETS_API}/api/rows/items?user=${wallet}`
+      url: buildRowsUrl("items", { user: wallet })
     },
     {
       source: "solarpanels",
-      url: `${FARMER_PETS_API}/api/rows/solarpanels?user=${wallet}`
+      url: buildRowsUrl("solarpanels", { user: wallet })
     }
   ];
 
@@ -371,10 +545,263 @@ function getSuccessChance(member) {
   return Math.min(chance, 0.75);
 }
 
+function buildFarmEventEmbed(farmEvent) {
+  const fields = [
+    {
+      name: "⏳ Time Limit",
+      value: "5 minutes",
+      inline: true
+    },
+    {
+      name: "💰 Rescue Reward",
+      value: `${farmEvent.rewardMin}-${farmEvent.rewardMax} $NKFE`,
+      inline: true
+    },
+    {
+      name: "🎮 How to Join",
+      value: "Run `/fp-rescue` or press **Rescue Pet** below.",
+      inline: false
+    }
+  ];
+
+  if (farmEvent.isCommunity) {
+    fields.splice(2, 0, {
+      name: "🤝 Community Goal",
+      value:
+        `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+        `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues\n` +
+        `Server milestone reward: **${farmEvent.communityBonus} $NKFE** for every verified participant if the goal is met.`,
+      inline: false
+    });
+  }
+
+  return new EmbedBuilder()
+    .setColor(farmEvent.isCommunity ? EMBED_COLORS.info : EMBED_COLORS.farm)
+    .setTitle(farmEvent.name)
+    .setDescription(
+      farmEvent.isCommunity
+        ? "🤝 A co-op Farm Emergency has started! Work together to hit the server goal."
+        : "🚨 A Farm Emergency has started!"
+    )
+    .addFields(fields)
+    .setFooter({ text: "Farmer Pets Rescue Event" })
+    .setTimestamp();
+}
+
+function buildRescueResultEmbed({ member, farmEvent, success, reward, successChance, streak }) {
+  const currentStreak = Number(streak?.current_rescue_streak || 0);
+  const bestStreak = Number(streak?.best_rescue_streak || 0);
+  const fields = [
+    { name: "Farmer", value: `**${member.displayName}**`, inline: true },
+    { name: "Event", value: farmEvent.name, inline: true },
+    { name: "Success Chance", value: formatPercent(successChance), inline: true },
+    { name: "Reward", value: `${reward} $NKFE`, inline: true },
+    { name: "Current Streak", value: `${currentStreak}`, inline: true },
+    { name: "Best Streak", value: `${bestStreak}`, inline: true }
+  ];
+
+  if (farmEvent.isCommunity) {
+    fields.push({
+      name: "🤝 Co-op Progress",
+      value:
+        `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+        `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+      inline: false
+    });
+  }
+
+  return new EmbedBuilder()
+    .setColor(success ? EMBED_COLORS.success : EMBED_COLORS.danger)
+    .setTitle(success ? "🌾 Farm Rescue Success!" : "🛡 Rescue Failed")
+    .setDescription(
+      success
+        ? `${member.displayName} rescued a pet and earned **${reward} $NKFE**.`
+        : `${member.displayName} could not complete this rescue.`
+    )
+    .addFields(fields)
+    .setTimestamp();
+}
+
+function buildCommunityGoalReachedEmbed(farmEvent) {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.success)
+    .setTitle("🎉 Community Goal Reached!")
+    .setDescription(
+      `Farmers hit **${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues for **${farmEvent.name}**!`
+    )
+    .addFields({
+      name: "Server Milestone Reward",
+      value: `Every verified participant will receive **${farmEvent.communityBonus} $NKFE** when the event ends.`,
+      inline: false
+    })
+    .setTimestamp();
+}
+
+function buildCommunityEventEndEmbed(farmEvent, rewardedCount) {
+  const goalMet = farmEvent.communitySuccesses >= farmEvent.communityGoal;
+
+  return new EmbedBuilder()
+    .setColor(goalMet ? EMBED_COLORS.success : EMBED_COLORS.warning)
+    .setTitle(goalMet ? "🏆 Co-op Farm Event Complete" : "🌾 Co-op Farm Event Ended")
+    .setDescription(
+      goalMet
+        ? `The server completed **${farmEvent.name}** and unlocked the milestone reward!`
+        : `The server made progress on **${farmEvent.name}**, but the milestone goal was not reached this time.`
+    )
+    .addFields(
+      {
+        name: "Final Progress",
+        value:
+          `${makeProgressBar(farmEvent.communitySuccesses, farmEvent.communityGoal)} ` +
+          `**${farmEvent.communitySuccesses}/${farmEvent.communityGoal}** successful rescues`,
+        inline: false
+      },
+      {
+        name: "Participants",
+        value: `**${farmEvent.players.size}** verified farmer(s) joined`,
+        inline: true
+      },
+      {
+        name: "Milestone Reward",
+        value: goalMet
+          ? `**${rewardedCount}** farmer(s) received **${farmEvent.communityBonus} $NKFE**.`
+          : "No milestone reward this time.",
+        inline: true
+      }
+    )
+    .setTimestamp();
+}
+
+function buildDailyCheckInEmbed({ displayName, wallet, streak, bestStreak, reward, todayKey }) {
+  const bonusLine = reward.streakBonus
+    ? `\n🔥 7-day streak bonus: **${reward.streakBonus} $NKFE**`
+    : "";
+
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.success)
+    .setTitle("🌞 Daily Farm Check-In Complete")
+    .setDescription(
+      `**${displayName}** checked in for **${todayKey}** and earned **${reward.total} $NKFE**.` +
+      bonusLine
+    )
+    .addFields(
+      { name: "Wallet", value: `**${wallet}**`, inline: false },
+      { name: "Daily Streak", value: `${streak} day(s)`, inline: true },
+      { name: "Best Daily Streak", value: `${bestStreak} day(s)`, inline: true },
+      { name: "Base Reward", value: `${reward.base} $NKFE`, inline: true }
+    )
+    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
+    .setTimestamp();
+}
+
+function buildAlreadyCheckedInEmbed({ displayName, lastDailyCheckIn, streak }) {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.warning)
+    .setTitle("🌞 Daily Farm Check-In Already Claimed")
+    .setDescription(
+      `**${displayName}**, you already checked in today (${lastDailyCheckIn}). Come back tomorrow!`
+    )
+    .addFields({ name: "Current Daily Streak", value: `${streak} day(s)`, inline: true })
+    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
+    .setTimestamp();
+}
+
 // FARM EVENTS
 
+function buildRescueButtonRow(disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(RESCUE_BUTTON_CUSTOM_ID)
+      .setLabel(disabled ? "Event Ended" : "Rescue Pet")
+      .setStyle(ButtonStyle.Success)
+      .setEmoji("🌾")
+      .setDisabled(disabled)
+  );
+}
+
+async function createEventThread(message, farmEvent) {
+  try {
+    if (!message?.startThread) return null;
+
+    return await message.startThread({
+      name: farmEvent.isCommunity
+        ? `🤝 ${farmEvent.name}`
+        : `🌾 ${farmEvent.name}`,
+      autoArchiveDuration: 60,
+      reason: "Farmer Pets event thread"
+    });
+  } catch (error) {
+    console.error("Failed to create Farmer Pets event thread:", error);
+    return null;
+  }
+}
+
+async function updateFarmEventMessage(farmEvent) {
+  try {
+    if (!farmEvent.message?.editable) return;
+
+    await farmEvent.message.edit({
+      content: `<@&${FARMER_VERIFIED_ROLE}>`,
+      embeds: [buildFarmEventEmbed(farmEvent)],
+      components: [buildRescueButtonRow()]
+    });
+  } catch (error) {
+    console.error("Failed to update Farmer Pets event message:", error);
+  }
+}
+
+async function closeFarmEventMessage(farmEvent) {
+  try {
+    if (!farmEvent.message?.editable) return;
+
+    await farmEvent.message.edit({
+      embeds: [buildFarmEventEmbed(farmEvent)],
+      components: [buildRescueButtonRow(true)]
+    });
+  } catch (error) {
+    console.error("Failed to close Farmer Pets event message:", error);
+  }
+}
+
+async function announceCommunityGoalReached(farmEvent) {
+  if (!farmEvent.isCommunity || farmEvent.goalAnnounced) return;
+  if (farmEvent.communitySuccesses < farmEvent.communityGoal) return;
+
+  farmEvent.goalAnnounced = true;
+
+  const target = getEventAnnouncementTarget(farmEvent);
+  if (!target?.isTextBased()) return;
+
+  await target.send({ embeds: [buildCommunityGoalReachedEmbed(farmEvent)] });
+}
+
+async function endFarmEvent(farmEvent) {
+  if (activeFarmEvent === farmEvent) {
+    activeFarmEvent = null;
+  }
+
+  await closeFarmEventMessage(farmEvent);
+
+  if (!farmEvent.isCommunity) return;
+
+  let rewardedCount = 0;
+
+  if (farmEvent.communitySuccesses >= farmEvent.communityGoal && !farmEvent.milestoneAwarded) {
+    farmEvent.milestoneAwarded = true;
+    rewardedCount = await awardCommunityMilestoneReward(
+      [...farmEvent.players],
+      farmEvent.communityBonus
+    );
+  }
+
+  const target = getEventAnnouncementTarget(farmEvent);
+  if (target?.isTextBased()) {
+    await target.send({ embeds: [buildCommunityEventEndEmbed(farmEvent, rewardedCount)] });
+  }
+}
+
 async function startFarmEvent() {
-  if (activeFarmEvent) return;
+  if (activeFarmEvent) return false;
 
   const roll = randomInt(1, 100);
 
@@ -392,29 +819,77 @@ async function startFarmEvent() {
     max = 10;
   }
 
-  activeFarmEvent = {
+  const isCommunity = randomInt(1, 100) <= COMMUNITY_EVENT_CHANCE;
+
+  if (isCommunity) {
+    name = `🤝 Co-op ${name.replace(/^\S+\s*/, "")}`;
+    min += 1;
+    max += 2;
+  }
+
+  const farmEvent = {
     name,
     rewardMin: min,
     rewardMax: max,
-    expires: Date.now() + 60000,
-    players: new Set()
+    expires: Date.now() + FARM_EVENT_DURATION_MS,
+    players: new Set(),
+    timeout: null,
+    channel: null,
+    message: null,
+    thread: null,
+    isCommunity,
+    communityGoal: isCommunity ? randomInt(COMMUNITY_GOAL_MIN, COMMUNITY_GOAL_MAX) : 0,
+    communitySuccesses: 0,
+    communityBonus: isCommunity ? randomInt(COMMUNITY_BONUS_MIN, COMMUNITY_BONUS_MAX) : 0,
+    goalAnnounced: false,
+    milestoneAwarded: false
   };
 
-  const channel = await client.channels.fetch(FARM_CHANNEL);
-  const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
+  activeFarmEvent = farmEvent;
 
-  await channel.send(
-    `${pingRole}\n\n` +
-      `${name}\n\n` +
-      `🚨 **A Farm Emergency has started!**\n\n` +
-      `Farmers have **5 minutes** to run **/fp-rescue**\n\n` +
-      `Reward: **${min}-${max} $NKFE**`
-  );
+  try {
+    const channel = await client.channels.fetch(FARM_CHANNEL);
 
-  setTimeout(() => {
-    activeFarmEvent = null;
-    scheduleEvent();
-  }, 60000);
+    if (!channel?.isTextBased()) {
+      throw new Error(`Farm channel ${FARM_CHANNEL} is not a text channel.`);
+    }
+
+    const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
+
+    farmEvent.channel = channel;
+    farmEvent.message = await channel.send({
+      content: pingRole,
+      embeds: [buildFarmEventEmbed(farmEvent)],
+      components: [buildRescueButtonRow()]
+    });
+    farmEvent.thread = await createEventThread(farmEvent.message, farmEvent);
+
+    if (farmEvent.thread?.isTextBased()) {
+      try {
+        await farmEvent.thread.send(
+          farmEvent.isCommunity
+            ? "🤝 Use this thread to coordinate the co-op rescue and cheer farmers on!"
+            : "🌾 Rescue discussion thread is open for this farm event."
+        );
+      } catch (error) {
+        console.error("Failed to send Farmer Pets event thread intro:", error);
+      }
+    }
+
+    farmEvent.timeout = setTimeout(() => {
+      endFarmEvent(farmEvent)
+        .catch(error => console.error("Failed to end Farmer Pets event:", error))
+        .finally(() => scheduleEvent());
+    }, FARM_EVENT_DURATION_MS);
+
+    return true;
+  } catch (error) {
+    if (activeFarmEvent === farmEvent) {
+      activeFarmEvent = null;
+    }
+
+    throw error;
+  }
 }
 
 function scheduleEvent() {
@@ -426,12 +901,17 @@ function scheduleEvent() {
   console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
 
   setTimeout(() => {
-    startFarmEvent();
+    startFarmEvent().catch(error => {
+      console.error("Failed to start scheduled Farmer Pets event:", error);
+      scheduleEvent();
+    });
   }, delay);
 }
 
 async function handleRescue(interaction) {
-  if (!activeFarmEvent) {
+  const farmEvent = activeFarmEvent;
+
+  if (!farmEvent) {
     await interaction.reply({
       content: "No active farm emergency.",
       flags: FLAGS_EPHEMERAL
@@ -439,7 +919,7 @@ async function handleRescue(interaction) {
     return;
   }
 
-  if (Date.now() > activeFarmEvent.expires) {
+  if (Date.now() > farmEvent.expires) {
     await interaction.reply({
       content: "This farm emergency has already ended.",
       flags: FLAGS_EPHEMERAL
@@ -447,7 +927,7 @@ async function handleRescue(interaction) {
     return;
   }
 
-  if (activeFarmEvent.players.has(interaction.user.id)) {
+  if (farmEvent.players.has(interaction.user.id)) {
     await interaction.reply({
       content: "You already attempted this rescue.",
       flags: FLAGS_EPHEMERAL
@@ -455,84 +935,245 @@ async function handleRescue(interaction) {
     return;
   }
 
+  farmEvent.players.add(interaction.user.id);
+
+  let attemptRecorded = false;
+
+  try {
+    const wallet = await getWallet(interaction.user.id);
+
+    if (!wallet) {
+      farmEvent.players.delete(interaction.user.id);
+
+      await interaction.reply({
+        content: "You must verify your wallet first using `/verify`.",
+        flags: FLAGS_EPHEMERAL
+      });
+      return;
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    await ensurePlayer(interaction.user.id, wallet);
+
+    const successChance = getSuccessChance(member);
+    const success = Math.random() < successChance;
+    const reward = success
+      ? randomInt(farmEvent.rewardMin, farmEvent.rewardMax)
+      : 0;
+
+    const streak = await recordRescue(
+      interaction.user.id,
+      wallet,
+      farmEvent.name,
+      success,
+      reward
+    );
+
+    if (farmEvent.isCommunity && success) {
+      farmEvent.communitySuccesses++;
+      await updateFarmEventMessage(farmEvent);
+      await announceCommunityGoalReached(farmEvent);
+    }
+
+    attemptRecorded = true;
+
+    const resultEmbed = buildRescueResultEmbed({
+      member,
+      farmEvent,
+      success,
+      reward,
+      successChance,
+      streak
+    });
+
+    await interaction.reply({
+      embeds: [resultEmbed],
+      flags: FLAGS_EPHEMERAL
+    });
+
+    try {
+      const target = getEventAnnouncementTarget(farmEvent);
+
+      if (target?.isTextBased()) {
+        await target.send({ embeds: [resultEmbed] });
+      }
+    } catch (error) {
+      console.error("Failed to announce Farmer Pets rescue result:", error);
+    }
+  } catch (error) {
+    if (!attemptRecorded) {
+      farmEvent.players.delete(interaction.user.id);
+    }
+
+    throw error;
+  }
+}
+
+// STATS / LEADERBOARD
+
+async function handleDailyCheckIn(interaction) {
   const wallet = await getWallet(interaction.user.id);
 
   if (!wallet) {
     await interaction.reply({
-      content: "You must verify your wallet first using `/verify`.",
+      content: "No verified wallet found. Please verify your wallet first using `/verify`.",
       flags: FLAGS_EPHEMERAL
     });
     return;
   }
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
+  const todayKey = getPacificDateKey();
+  const yesterdayKey = getYesterdayPacificDateKey();
 
   await ensurePlayer(interaction.user.id, wallet);
 
-  const successChance = getSuccessChance(member);
-  const success = Math.random() < successChance;
-  const reward = success
-    ? randomInt(activeFarmEvent.rewardMin, activeFarmEvent.rewardMax)
-    : 0;
-
-  activeFarmEvent.players.add(interaction.user.id);
-
-  await recordRescue(
-    interaction.user.id,
-    wallet,
-    activeFarmEvent.name,
-    success,
-    reward
+  const currentRes = await pool.query(
+    `
+    SELECT daily_streak,
+           best_daily_streak,
+           to_char(last_daily_checkin, 'YYYY-MM-DD') AS last_daily_checkin_key
+    FROM farmerpets_balances
+    WHERE discord_id = $1;
+    `,
+    [interaction.user.id]
   );
+
+  const dailyCheckInRow = currentRes.rows[0] || {};
+  const lastDailyCheckIn = dailyCheckInRow.last_daily_checkin_key;
+
+  if (lastDailyCheckIn === todayKey) {
+    await interaction.reply({
+      embeds: [buildAlreadyCheckedInEmbed({
+        displayName: member.displayName,
+        lastDailyCheckIn,
+        streak: Number(dailyCheckInRow.daily_streak || 0)
+      })],
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  const streak = lastDailyCheckIn === yesterdayKey
+    ? Number(dailyCheckInRow.daily_streak || 0) + 1
+    : 1;
+  const reward = calculateDailyReward(streak);
+
+  const updateRes = await pool.query(
+    `
+    UPDATE farmerpets_balances
+    SET payout_nkfe = payout_nkfe + $2,
+        lifetime_nkfe = lifetime_nkfe + $2,
+        weekly_nkfe = weekly_nkfe + $2,
+        daily_streak = $3,
+        best_daily_streak = GREATEST(best_daily_streak, $3),
+        last_daily_checkin = $4::date,
+        updated_at = NOW()
+    WHERE discord_id = $1
+    RETURNING daily_streak, best_daily_streak;
+    `,
+    [interaction.user.id, reward.total, streak, todayKey]
+  );
+
+  const updated = updateRes.rows[0];
 
   await interaction.reply({
-    content: success
-      ? `🌾 Farm Rescue Success!\n\nReward: **${reward} $NKFE**`
-      : "🛡 Rescue Failed.",
+    embeds: [buildDailyCheckInEmbed({
+      displayName: member.displayName,
+      wallet,
+      streak: Number(updated.daily_streak || 0),
+      bestStreak: Number(updated.best_daily_streak || 0),
+      reward,
+      todayKey
+    })],
     flags: FLAGS_EPHEMERAL
   });
-
-  const channel = await client.channels.fetch(FARM_CHANNEL);
-
-  await channel.send(
-    success
-      ? `🌾 **FARM RESCUE SUCCESS**\n\nFarmer: **${member.displayName}**\nEvent: **${activeFarmEvent.name}**\nReward: **${reward} $NKFE**`
-      : `🛡 **FARM RESCUE FAILED**\n\nFarmer: **${member.displayName}**\nEvent: **${activeFarmEvent.name}**`
-  );
 }
 
-// STATS / LEADERBOARD
-
-async function buildStatsMessage(discordId, displayName) {
+async function buildStatsPayload(discordId, displayName) {
   const wallet = await getWallet(discordId);
 
   if (!wallet) {
-    return "No verified wallet found. Please verify your wallet first using `/verify`.";
+    return {
+      content: "No verified wallet found. Please verify your wallet first using `/verify`."
+    };
   }
 
   await ensurePlayer(discordId, wallet);
 
   const res = await pool.query(
-    "SELECT * FROM farmerpets_balances WHERE discord_id = $1",
+    `
+    SELECT *, to_char(last_daily_checkin, 'YYYY-MM-DD') AS last_daily_checkin_key
+    FROM farmerpets_balances
+    WHERE discord_id = $1;
+    `,
     [discordId]
   );
 
   const row = res.rows[0];
   const attempts = Number(row.total_attempts || 0);
   const successes = Number(row.total_successes || 0);
-  const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
+  const successRate = attempts ? successes / attempts : 0;
+  const weeklyAttempts = Number(row.weekly_attempts || 0);
+  const weeklySuccesses = Number(row.weekly_successes || 0);
+  const weeklySuccessRate = weeklyAttempts ? weeklySuccesses / weeklyAttempts : 0;
 
-  return (
-    `🌾 **Farmer Pets Stats**\n\n` +
-    `Farmer: **${displayName}**\n` +
-    `Wallet: **${wallet}**\n\n` +
-    `Current Payout Owed: **${row.payout_nkfe} $NKFE**\n` +
-    `Weekly NKFE Earned: **${row.weekly_nkfe} $NKFE**\n` +
-    `Lifetime NKFE Earned: **${row.lifetime_nkfe} $NKFE**\n` +
-    `Rescue Attempts: **${attempts}**\n` +
-    `Successful Rescues: **${successes}**\n` +
-    `Success Rate: **${successRate}%**`
-  );
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLORS.info)
+    .setTitle("🌾 Farmer Pets Stats")
+    .setDescription(`Stats for **${displayName}**`)
+    .addFields(
+      { name: "Wallet", value: `**${wallet}**`, inline: false },
+      {
+        name: "💰 NKFE",
+        value: [
+          `Payout Owed: **${formatNumber(row.payout_nkfe)} $NKFE**`,
+          `Weekly: **${formatNumber(row.weekly_nkfe)} $NKFE**`,
+          `Lifetime: **${formatNumber(row.lifetime_nkfe)} $NKFE**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🛡 Rescue Record",
+        value: [
+          `Attempts: **${formatNumber(attempts)}**`,
+          `Successes: **${formatNumber(successes)}**`,
+          `Success Rate: **${formatPercent(successRate)}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🏆 Weekly Rescue",
+        value: [
+          `Attempts: **${formatNumber(weeklyAttempts)}**`,
+          `Successes: **${formatNumber(weeklySuccesses)}**`,
+          `Success Rate: **${formatPercent(weeklySuccessRate)}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🔥 Rescue Streaks",
+        value: [
+          `Current: **${formatNumber(row.current_rescue_streak)}**`,
+          `Best: **${formatNumber(row.best_rescue_streak)}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🌞 Daily Check-In",
+        value: [
+          `Current: **${formatNumber(row.daily_streak)} day(s)**`,
+          `Best: **${formatNumber(row.best_daily_streak)} day(s)**`,
+          `Last: **${row.last_daily_checkin_key || "Never"}**`
+        ].join("\n"),
+        inline: true
+      }
+    )
+    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
+    .setTimestamp();
+
+  return { embeds: [embed] };
 }
 
 async function buildLeaderboardMessage() {
@@ -607,6 +1248,10 @@ const commands = [
     .setDescription("Show your Farmer Pets rescue stats"),
 
   new SlashCommandBuilder()
+    .setName("fp-daily")
+    .setDescription("Claim your daily Farmer Pets check-in reward"),
+
+  new SlashCommandBuilder()
     .setName("fp-leaderboard")
     .setDescription("Show the Farmer Pets weekly leaderboard"),
 
@@ -670,9 +1315,17 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-
   try {
+    if (interaction.isButton()) {
+      if (interaction.customId === RESCUE_BUTTON_CUSTOM_ID) {
+        await handleRescue(interaction);
+      }
+
+      return;
+    }
+
+    if (!interaction.isChatInputCommand()) return;
+
     if (interaction.commandName === "fp-rescue") {
       await handleRescue(interaction);
       return;
@@ -688,7 +1341,18 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      const assetData = await getAssets(wallet);
+      let assetData;
+
+      try {
+        assetData = await getAssets(wallet);
+      } catch (error) {
+        console.error("Failed to fetch Farmer Pets assets:", error);
+        await interaction.editReply(
+          "Farmer Pets asset services are unavailable right now. No roles were changed; please try again later."
+        );
+        return;
+      }
+
       const analysis = analyzeAssets(assetData.combinedAssets);
       const member = await interaction.guild.members.fetch(interaction.user.id);
 
@@ -712,12 +1376,17 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "fp-stats") {
       const member = await interaction.guild.members.fetch(interaction.user.id);
-      const message = await buildStatsMessage(interaction.user.id, member.displayName);
+      const payload = await buildStatsPayload(interaction.user.id, member.displayName);
 
       await interaction.reply({
-        content: message,
+        ...payload,
         flags: FLAGS_EPHEMERAL
       });
+      return;
+    }
+
+    if (interaction.commandName === "fp-daily") {
+      await handleDailyCheckIn(interaction);
       return;
     }
 
@@ -783,10 +1452,12 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      await startFarmEvent();
+      const started = await startFarmEvent();
 
       await interaction.reply({
-        content: "Test Farmer Pets event started.",
+        content: started
+          ? "Test Farmer Pets event started."
+          : "A Farmer Pets event is already active.",
         flags: FLAGS_EPHEMERAL
       });
       return;
