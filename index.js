@@ -1027,7 +1027,8 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  await ensurePlayer(interaction.user.id, wallet);
+  const dailyCheckInRow = currentRes.rows[0] || {};
+  const lastDailyCheckIn = dailyCheckInRow.last_daily_checkin_key;
 
   const currentRes = await pool.query(
     `
