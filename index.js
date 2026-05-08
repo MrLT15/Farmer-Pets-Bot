@@ -7,7 +7,8 @@ const {
   PermissionFlagsBits,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const { Pool } = require("pg");
@@ -30,6 +31,14 @@ const FLAGS_EPHEMERAL = 64;
 const FARM_EVENT_DURATION_MS = 5 * 60 * 1000;
 const ATOMIC_ASSET_PAGE_LIMIT = 1000;
 const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
+const PACIFIC_TIME_ZONE = "America/Los_Angeles";
+const EMBED_COLORS = {
+  success: 0x2ecc71,
+  warning: 0xf1c40f,
+  danger: 0xe74c3c,
+  info: 0x3498db,
+  farm: 0x8bc34a
+};
 
 const ROLES = {
   verified: { id: "1499240994397356112", name: "🌱 Farmer Pets Verified" },
@@ -56,6 +65,46 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-US");
+}
+
+function formatPercent(value) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function getPacificDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PACIFIC_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts
+      .filter(part => part.type !== "literal")
+      .map(part => [part.type, part.value])
+  );
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getYesterdayPacificDateKey() {
+  return getPacificDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+}
+
+function calculateDailyReward(streak) {
+  const base = randomInt(1, 3);
+  const streakBonus = streak > 0 && streak % 7 === 0 ? 5 : 0;
+
+  return {
+    base,
+    streakBonus,
+    total: base + streakBonus
+  };
+}
+
 // DATABASE
 
 async function initDatabase() {
@@ -72,8 +121,22 @@ async function initDatabase() {
       weekly_nkfe INTEGER NOT NULL DEFAULT 0,
       weekly_successes INTEGER NOT NULL DEFAULT 0,
       weekly_attempts INTEGER NOT NULL DEFAULT 0,
+      daily_streak INTEGER NOT NULL DEFAULT 0,
+      best_daily_streak INTEGER NOT NULL DEFAULT 0,
+      last_daily_checkin DATE,
+      current_rescue_streak INTEGER NOT NULL DEFAULT 0,
+      best_rescue_streak INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE farmerpets_balances
+      ADD COLUMN IF NOT EXISTS daily_streak INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS best_daily_streak INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS last_daily_checkin DATE,
+      ADD COLUMN IF NOT EXISTS current_rescue_streak INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS best_rescue_streak INTEGER NOT NULL DEFAULT 0;
   `);
 
   await pool.query(`
@@ -152,7 +215,9 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
     [discordId, wallet, eventName, success, reward]
   );
 
-  await pool.query(
+  const rescueStreak = success ? 1 : 0;
+
+  const res = await pool.query(
     `
     INSERT INTO farmerpets_balances (
       discord_id,
@@ -164,9 +229,11 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
       weekly_nkfe,
       weekly_successes,
       weekly_attempts,
+      current_rescue_streak,
+      best_rescue_streak,
       updated_at
     )
-    VALUES ($1, $2, $3, $3, $4, 1, $3, $4, 1, NOW())
+    VALUES ($1, $2, $3, $3, $4, 1, $3, $4, 1, $5, $5, NOW())
     ON CONFLICT (discord_id)
     DO UPDATE SET
       wallet = EXCLUDED.wallet,
@@ -177,10 +244,24 @@ async function recordRescue(discordId, wallet, eventName, success, reward) {
       weekly_nkfe = farmerpets_balances.weekly_nkfe + EXCLUDED.weekly_nkfe,
       weekly_successes = farmerpets_balances.weekly_successes + EXCLUDED.weekly_successes,
       weekly_attempts = farmerpets_balances.weekly_attempts + 1,
-      updated_at = NOW();
+      current_rescue_streak = CASE
+        WHEN $4 = 1 THEN farmerpets_balances.current_rescue_streak + 1
+        ELSE 0
+      END,
+      best_rescue_streak = CASE
+        WHEN $4 = 1 THEN GREATEST(
+          farmerpets_balances.best_rescue_streak,
+          farmerpets_balances.current_rescue_streak + 1
+        )
+        ELSE farmerpets_balances.best_rescue_streak
+      END,
+      updated_at = NOW()
+    RETURNING current_rescue_streak, best_rescue_streak;
     `,
-    [discordId, wallet, reward, success ? 1 : 0]
+    [discordId, wallet, reward, success ? 1 : 0, rescueStreak]
   );
+
+  return res.rows[0];
 }
 
 // ASSETS
@@ -427,6 +508,89 @@ function getSuccessChance(member) {
   return Math.min(chance, 0.75);
 }
 
+function buildFarmEventEmbed(farmEvent) {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.farm)
+    .setTitle(farmEvent.name)
+    .setDescription("🚨 A Farm Emergency has started!")
+    .addFields(
+      {
+        name: "⏳ Time Limit",
+        value: "5 minutes",
+        inline: true
+      },
+      {
+        name: "💰 Reward",
+        value: `${farmEvent.rewardMin}-${farmEvent.rewardMax} $NKFE`,
+        inline: true
+      },
+      {
+        name: "🎮 How to Join",
+        value: "Run `/fp-rescue` or press **Rescue Pet** below.",
+        inline: false
+      }
+    )
+    .setFooter({ text: "Farmer Pets Rescue Event" })
+    .setTimestamp();
+}
+
+function buildRescueResultEmbed({ member, farmEvent, success, reward, successChance, streak }) {
+  const currentStreak = Number(streak?.current_rescue_streak || 0);
+  const bestStreak = Number(streak?.best_rescue_streak || 0);
+
+  return new EmbedBuilder()
+    .setColor(success ? EMBED_COLORS.success : EMBED_COLORS.danger)
+    .setTitle(success ? "🌾 Farm Rescue Success!" : "🛡 Rescue Failed")
+    .setDescription(
+      success
+        ? `${member.displayName} rescued a pet and earned **${reward} $NKFE**.`
+        : `${member.displayName} could not complete this rescue.`
+    )
+    .addFields(
+      { name: "Farmer", value: `**${member.displayName}**`, inline: true },
+      { name: "Event", value: farmEvent.name, inline: true },
+      { name: "Success Chance", value: formatPercent(successChance), inline: true },
+      { name: "Reward", value: `${reward} $NKFE`, inline: true },
+      { name: "Current Streak", value: `${currentStreak}`, inline: true },
+      { name: "Best Streak", value: `${bestStreak}`, inline: true }
+    )
+    .setTimestamp();
+}
+
+function buildDailyCheckInEmbed({ displayName, wallet, streak, bestStreak, reward, todayKey }) {
+  const bonusLine = reward.streakBonus
+    ? `\n🔥 7-day streak bonus: **${reward.streakBonus} $NKFE**`
+    : "";
+
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.success)
+    .setTitle("🌞 Daily Farm Check-In Complete")
+    .setDescription(
+      `**${displayName}** checked in for **${todayKey}** and earned **${reward.total} $NKFE**.` +
+      bonusLine
+    )
+    .addFields(
+      { name: "Wallet", value: `**${wallet}**`, inline: false },
+      { name: "Daily Streak", value: `${streak} day(s)`, inline: true },
+      { name: "Best Daily Streak", value: `${bestStreak} day(s)`, inline: true },
+      { name: "Base Reward", value: `${reward.base} $NKFE`, inline: true }
+    )
+    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
+    .setTimestamp();
+}
+
+function buildAlreadyCheckedInEmbed({ displayName, lastDailyCheckIn, streak }) {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLORS.warning)
+    .setTitle("🌞 Daily Farm Check-In Already Claimed")
+    .setDescription(
+      `**${displayName}**, you already checked in today (${lastDailyCheckIn}). Come back tomorrow!`
+    )
+    .addFields({ name: "Current Daily Streak", value: `${streak} day(s)`, inline: true })
+    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
+    .setTimestamp();
+}
+
 // FARM EVENTS
 
 function buildRescueButtonRow() {
@@ -479,12 +643,8 @@ async function startFarmEvent() {
     const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
 
     await channel.send({
-      content:
-        `${pingRole}\n\n` +
-        `${name}\n\n` +
-        `🚨 **A Farm Emergency has started!**\n\n` +
-        `Farmers have **5 minutes** to run **/fp-rescue** or press **Rescue Pet** below.\n\n` +
-        `Reward: **${min}-${max} $NKFE**`,
+      content: pingRole,
+      embeds: [buildFarmEventEmbed(farmEvent)],
       components: [buildRescueButtonRow()]
     });
 
@@ -576,7 +736,7 @@ async function handleRescue(interaction) {
       ? randomInt(farmEvent.rewardMin, farmEvent.rewardMax)
       : 0;
 
-    await recordRescue(
+    const streak = await recordRescue(
       interaction.user.id,
       wallet,
       farmEvent.name,
@@ -586,10 +746,17 @@ async function handleRescue(interaction) {
 
     attemptRecorded = true;
 
+    const resultEmbed = buildRescueResultEmbed({
+      member,
+      farmEvent,
+      success,
+      reward,
+      successChance,
+      streak
+    });
+
     await interaction.reply({
-      content: success
-        ? `🌾 Farm Rescue Success!\n\nReward: **${reward} $NKFE**`
-        : "🛡 Rescue Failed.",
+      embeds: [resultEmbed],
       flags: FLAGS_EPHEMERAL
     });
 
@@ -597,11 +764,7 @@ async function handleRescue(interaction) {
       const channel = await client.channels.fetch(FARM_CHANNEL);
 
       if (channel?.isTextBased()) {
-        await channel.send(
-          success
-            ? `🌾 **FARM RESCUE SUCCESS**\n\nFarmer: **${member.displayName}**\nEvent: **${farmEvent.name}**\nReward: **${reward} $NKFE**`
-            : `🛡 **FARM RESCUE FAILED**\n\nFarmer: **${member.displayName}**\nEvent: **${farmEvent.name}**`
-        );
+        await channel.send({ embeds: [resultEmbed] });
       }
     } catch (error) {
       console.error("Failed to announce Farmer Pets rescue result:", error);
@@ -617,36 +780,169 @@ async function handleRescue(interaction) {
 
 // STATS / LEADERBOARD
 
-async function buildStatsMessage(discordId, displayName) {
+async function handleDailyCheckIn(interaction) {
+  const wallet = await getWallet(interaction.user.id);
+
+  if (!wallet) {
+    await interaction.reply({
+      content: "No verified wallet found. Please verify your wallet first using `/verify`.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const todayKey = getPacificDateKey();
+  const yesterdayKey = getYesterdayPacificDateKey();
+
+    if (!wallet) {
+      farmEvent.players.delete(interaction.user.id);
+
+  const currentRes = await pool.query(
+    `
+    SELECT daily_streak,
+           best_daily_streak,
+           to_char(last_daily_checkin, 'YYYY-MM-DD') AS last_daily_checkin_key
+    FROM farmerpets_balances
+    WHERE discord_id = $1;
+    `,
+    [interaction.user.id]
+  );
+
+  const current = currentRes.rows[0] || {};
+  const lastDailyCheckIn = current.last_daily_checkin_key;
+
+  if (lastDailyCheckIn === todayKey) {
+    await interaction.reply({
+      embeds: [buildAlreadyCheckedInEmbed({
+        displayName: member.displayName,
+        lastDailyCheckIn,
+        streak: Number(current.daily_streak || 0)
+      })],
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  const streak = lastDailyCheckIn === yesterdayKey
+    ? Number(current.daily_streak || 0) + 1
+    : 1;
+  const reward = calculateDailyReward(streak);
+
+  const updateRes = await pool.query(
+    `
+    UPDATE farmerpets_balances
+    SET payout_nkfe = payout_nkfe + $2,
+        lifetime_nkfe = lifetime_nkfe + $2,
+        weekly_nkfe = weekly_nkfe + $2,
+        daily_streak = $3,
+        best_daily_streak = GREATEST(best_daily_streak, $3),
+        last_daily_checkin = $4::date,
+        updated_at = NOW()
+    WHERE discord_id = $1
+    RETURNING daily_streak, best_daily_streak;
+    `,
+    [interaction.user.id, reward.total, streak, todayKey]
+  );
+
+  const updated = updateRes.rows[0];
+
+  await interaction.reply({
+    embeds: [buildDailyCheckInEmbed({
+      displayName: member.displayName,
+      wallet,
+      streak: Number(updated.daily_streak || 0),
+      bestStreak: Number(updated.best_daily_streak || 0),
+      reward,
+      todayKey
+    })],
+    flags: FLAGS_EPHEMERAL
+  });
+}
+
+async function buildStatsPayload(discordId, displayName) {
   const wallet = await getWallet(discordId);
 
   if (!wallet) {
-    return "No verified wallet found. Please verify your wallet first using `/verify`.";
+    return {
+      content: "No verified wallet found. Please verify your wallet first using `/verify`."
+    };
   }
 
   await ensurePlayer(discordId, wallet);
 
   const res = await pool.query(
-    "SELECT * FROM farmerpets_balances WHERE discord_id = $1",
+    `
+    SELECT *, to_char(last_daily_checkin, 'YYYY-MM-DD') AS last_daily_checkin_key
+    FROM farmerpets_balances
+    WHERE discord_id = $1;
+    `,
     [discordId]
   );
 
   const row = res.rows[0];
   const attempts = Number(row.total_attempts || 0);
   const successes = Number(row.total_successes || 0);
-  const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
+  const successRate = attempts ? successes / attempts : 0;
+  const weeklyAttempts = Number(row.weekly_attempts || 0);
+  const weeklySuccesses = Number(row.weekly_successes || 0);
+  const weeklySuccessRate = weeklyAttempts ? weeklySuccesses / weeklyAttempts : 0;
 
-  return (
-    `🌾 **Farmer Pets Stats**\n\n` +
-    `Farmer: **${displayName}**\n` +
-    `Wallet: **${wallet}**\n\n` +
-    `Current Payout Owed: **${row.payout_nkfe} $NKFE**\n` +
-    `Weekly NKFE Earned: **${row.weekly_nkfe} $NKFE**\n` +
-    `Lifetime NKFE Earned: **${row.lifetime_nkfe} $NKFE**\n` +
-    `Rescue Attempts: **${attempts}**\n` +
-    `Successful Rescues: **${successes}**\n` +
-    `Success Rate: **${successRate}%**`
-  );
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLORS.info)
+    .setTitle("🌾 Farmer Pets Stats")
+    .setDescription(`Stats for **${displayName}**`)
+    .addFields(
+      { name: "Wallet", value: `**${wallet}**`, inline: false },
+      {
+        name: "💰 NKFE",
+        value: [
+          `Payout Owed: **${formatNumber(row.payout_nkfe)} $NKFE**`,
+          `Weekly: **${formatNumber(row.weekly_nkfe)} $NKFE**`,
+          `Lifetime: **${formatNumber(row.lifetime_nkfe)} $NKFE**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🛡 Rescue Record",
+        value: [
+          `Attempts: **${formatNumber(attempts)}**`,
+          `Successes: **${formatNumber(successes)}**`,
+          `Success Rate: **${formatPercent(successRate)}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🏆 Weekly Rescue",
+        value: [
+          `Attempts: **${formatNumber(weeklyAttempts)}**`,
+          `Successes: **${formatNumber(weeklySuccesses)}**`,
+          `Success Rate: **${formatPercent(weeklySuccessRate)}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🔥 Rescue Streaks",
+        value: [
+          `Current: **${formatNumber(row.current_rescue_streak)}**`,
+          `Best: **${formatNumber(row.best_rescue_streak)}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: "🌞 Daily Check-In",
+        value: [
+          `Current: **${formatNumber(row.daily_streak)} day(s)**`,
+          `Best: **${formatNumber(row.best_daily_streak)} day(s)**`,
+          `Last: **${row.last_daily_checkin_key || "Never"}**`
+        ].join("\n"),
+        inline: true
+      }
+    )
+    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
+    .setTimestamp();
+
+  return { embeds: [embed] };
 }
 
 async function buildLeaderboardMessage() {
@@ -719,6 +1015,10 @@ const commands = [
   new SlashCommandBuilder()
     .setName("fp-stats")
     .setDescription("Show your Farmer Pets rescue stats"),
+
+  new SlashCommandBuilder()
+    .setName("fp-daily")
+    .setDescription("Claim your daily Farmer Pets check-in reward"),
 
   new SlashCommandBuilder()
     .setName("fp-leaderboard")
@@ -845,12 +1145,17 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "fp-stats") {
       const member = await interaction.guild.members.fetch(interaction.user.id);
-      const message = await buildStatsMessage(interaction.user.id, member.displayName);
+      const payload = await buildStatsPayload(interaction.user.id, member.displayName);
 
       await interaction.reply({
-        content: message,
+        ...payload,
         flags: FLAGS_EPHEMERAL
       });
+      return;
+    }
+
+    if (interaction.commandName === "fp-daily") {
+      await handleDailyCheckIn(interaction);
       return;
     }
 
