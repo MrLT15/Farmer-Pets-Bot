@@ -1593,22 +1593,20 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "fp-testevent") {
+      await interaction.deferReply({ flags: FLAGS_EPHEMERAL });
+
       if (activeFarmEvent) {
-        await interaction.reply({
-          content: "A Farmer Pets event is already active.",
-          flags: FLAGS_EPHEMERAL
-        });
+        await interaction.editReply("A Farmer Pets event is already active.");
         return;
       }
 
       const started = await startFarmEvent();
 
-      await interaction.reply({
-        content: started
+      await interaction.editReply(
+        started
           ? "Test Farmer Pets event started."
-          : "A Farmer Pets event is already active.",
-        flags: FLAGS_EPHEMERAL
-      });
+          : "A Farmer Pets event is already active."
+      );
       return;
     }
   } catch (error) {
