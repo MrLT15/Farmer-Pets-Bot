@@ -1027,8 +1027,8 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  const current = currentRes.rows[0] || {};
-  const lastDailyCheckIn = current.last_daily_checkin_key;
+  const dailyCheckInRow = currentRes.rows[0] || {};
+  const lastDailyCheckIn = dailyCheckInRow.last_daily_checkin_key;
 
   const currentRes = await pool.query(
     `
@@ -1041,31 +1041,23 @@ async function handleDailyCheckIn(interaction) {
     [interaction.user.id]
   );
 
-  const dailyCheckInRow = currentRes.rows[0] || {};
-  const lastDailyCheckIn = dailyCheckInRow.last_daily_checkin_key;
+  const fpDailyCheckInState = currentRes.rows[0] || {};
+  const fpDailyLastCheckInKey = fpDailyCheckInState.last_daily_checkin_key;
 
-  const current = currentRes.rows[0] || {};
-  const lastDailyCheckIn = current.last_daily_checkin_key;
-
-  if (lastDailyCheckIn === todayKey) {
+  if (fpDailyLastCheckInKey === todayKey) {
     await interaction.reply({
       embeds: [buildAlreadyCheckedInEmbed({
         displayName: member.displayName,
-        lastDailyCheckIn,
-        streak: Number(dailyCheckInRow.daily_streak || 0)
-
-        streak: Number(current.daily_streak || 0)
-
+        lastDailyCheckIn: fpDailyLastCheckInKey,
+        streak: Number(fpDailyCheckInState.daily_streak || 0)
       })],
       flags: FLAGS_EPHEMERAL
     });
     return;
   }
 
-  const streak = lastDailyCheckIn === yesterdayKey
-    ? Number(dailyCheckInRow.daily_streak || 0) + 1
-    ? Number(current.daily_streak || 0) + 1
-
+  const streak = fpDailyLastCheckInKey === yesterdayKey
+    ? Number(fpDailyCheckInState.daily_streak || 0) + 1
     : 1;
   const reward = calculateDailyReward(streak);
 
