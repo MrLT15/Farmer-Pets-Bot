@@ -4,7 +4,10 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require("discord.js");
 
 const { Pool } = require("pg");
@@ -24,6 +27,9 @@ const FARMER_PETS_API = "https://pets-api-main.herokuapp.com";
 const CONTRACT_ACCOUNT = "farmerpetssc";
 
 const FLAGS_EPHEMERAL = 64;
+const FARM_EVENT_DURATION_MS = 5 * 60 * 1000;
+const ATOMIC_ASSET_PAGE_LIMIT = 1000;
+const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
 
 const ROLES = {
   verified: { id: "1499240994397356112", name: "🌱 Farmer Pets Verified" },
@@ -53,6 +59,8 @@ function randomInt(min, max) {
 // DATABASE
 
 async function initDatabase() {
+  await validateRequiredTables();
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS farmerpets_balances (
       discord_id TEXT PRIMARY KEY,
@@ -81,6 +89,37 @@ async function initDatabase() {
   `);
 
   console.log("Farmer Pets database tables ready.");
+}
+
+async function validateRequiredTables() {
+  const tableRes = await pool.query(
+    "SELECT to_regclass('public.verified_wallets') AS verified_wallets"
+  );
+
+  if (!tableRes.rows[0]?.verified_wallets) {
+    throw new Error(
+      "Missing required table public.verified_wallets. This bot depends on an existing wallet verification table with discord_id and wallet columns."
+    );
+  }
+
+  const columnRes = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'verified_wallets'
+      AND column_name = ANY($1::text[]);
+  `, [["discord_id", "wallet"]]);
+
+  const columns = new Set(columnRes.rows.map(row => row.column_name));
+  const missingColumns = ["discord_id", "wallet"].filter(
+    column => !columns.has(column)
+  );
+
+  if (missingColumns.length) {
+    throw new Error(
+      `Table public.verified_wallets is missing required column(s): ${missingColumns.join(", ")}.`
+    );
+  }
 }
 
 async function getWallet(discordId) {
@@ -151,8 +190,7 @@ async function getJsonSafe(url) {
     const res = await fetch(url);
 
     if (!res.ok) {
-      console.log(`Fetch failed ${res.status}: ${url}`);
-      return [];
+      throw new Error(`Fetch failed ${res.status}: ${url}`);
     }
 
     const json = await res.json();
@@ -163,19 +201,31 @@ async function getJsonSafe(url) {
 
     return [];
   } catch (error) {
-    console.log(`Failed to fetch ${url}:`, error.message);
-    return [];
+    throw new Error(`Failed to fetch ${url}: ${error.message}`);
   }
 }
 
 async function getWalletAssets(wallet) {
-  const url =
-    `${ATOMIC_API}` +
-    `?owner=${wallet}` +
-    `&collection_name=farmerpetsgo` +
-    `&limit=1000`;
+  const assets = [];
+  let page = 1;
 
-  return await getJsonSafe(url);
+  while (true) {
+    const params = new URLSearchParams({
+      owner: wallet,
+      collection_name: "farmerpetsgo",
+      limit: String(ATOMIC_ASSET_PAGE_LIMIT),
+      page: String(page)
+    });
+
+    const pageAssets = await getJsonSafe(`${ATOMIC_API}?${params.toString()}`);
+    assets.push(...pageAssets);
+
+    if (pageAssets.length < ATOMIC_ASSET_PAGE_LIMIT) break;
+
+    page++;
+  }
+
+  return assets;
 }
 
 function makePseudoAssetFromRow(row, source) {
@@ -209,27 +259,33 @@ function makePseudoAssetFromRow(row, source) {
   };
 }
 
+function buildRowsUrl(table, params) {
+  const query = new URLSearchParams(params).toString();
+
+  return `${FARMER_PETS_API}/api/rows/${table}?${query}`;
+}
+
 async function getStakedAssets(wallet) {
   const urls = [
     {
       source: "tools",
-      url: `${FARMER_PETS_API}/api/rows/tools?scope=${CONTRACT_ACCOUNT}&user=${wallet}`
+      url: buildRowsUrl("tools", { scope: CONTRACT_ACCOUNT, user: wallet })
     },
     {
       source: "lands",
-      url: `${FARMER_PETS_API}/api/rows/lands?scope=${CONTRACT_ACCOUNT}&user=${wallet}`
+      url: buildRowsUrl("lands", { scope: CONTRACT_ACCOUNT, user: wallet })
     },
     {
       source: "pets",
-      url: `${FARMER_PETS_API}/api/rows/pets?user=${wallet}`
+      url: buildRowsUrl("pets", { user: wallet })
     },
     {
       source: "items",
-      url: `${FARMER_PETS_API}/api/rows/items?user=${wallet}`
+      url: buildRowsUrl("items", { user: wallet })
     },
     {
       source: "solarpanels",
-      url: `${FARMER_PETS_API}/api/rows/solarpanels?user=${wallet}`
+      url: buildRowsUrl("solarpanels", { user: wallet })
     }
   ];
 
@@ -373,8 +429,18 @@ function getSuccessChance(member) {
 
 // FARM EVENTS
 
+function buildRescueButtonRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(RESCUE_BUTTON_CUSTOM_ID)
+      .setLabel("Rescue Pet")
+      .setStyle(ButtonStyle.Success)
+      .setEmoji("🌾")
+  );
+}
+
 async function startFarmEvent() {
-  if (activeFarmEvent) return;
+  if (activeFarmEvent) return false;
 
   const roll = randomInt(1, 100);
 
@@ -392,29 +458,52 @@ async function startFarmEvent() {
     max = 10;
   }
 
-  activeFarmEvent = {
+  const farmEvent = {
     name,
     rewardMin: min,
     rewardMax: max,
-    expires: Date.now() + 60000,
-    players: new Set()
+    expires: Date.now() + FARM_EVENT_DURATION_MS,
+    players: new Set(),
+    timeout: null
   };
 
-  const channel = await client.channels.fetch(FARM_CHANNEL);
-  const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
+  activeFarmEvent = farmEvent;
 
-  await channel.send(
-    `${pingRole}\n\n` +
-      `${name}\n\n` +
-      `🚨 **A Farm Emergency has started!**\n\n` +
-      `Farmers have **5 minutes** to run **/fp-rescue**\n\n` +
-      `Reward: **${min}-${max} $NKFE**`
-  );
+  try {
+    const channel = await client.channels.fetch(FARM_CHANNEL);
 
-  setTimeout(() => {
-    activeFarmEvent = null;
-    scheduleEvent();
-  }, 60000);
+    if (!channel?.isTextBased()) {
+      throw new Error(`Farm channel ${FARM_CHANNEL} is not a text channel.`);
+    }
+
+    const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
+
+    await channel.send({
+      content:
+        `${pingRole}\n\n` +
+        `${name}\n\n` +
+        `🚨 **A Farm Emergency has started!**\n\n` +
+        `Farmers have **5 minutes** to run **/fp-rescue** or press **Rescue Pet** below.\n\n` +
+        `Reward: **${min}-${max} $NKFE**`,
+      components: [buildRescueButtonRow()]
+    });
+
+    farmEvent.timeout = setTimeout(() => {
+      if (activeFarmEvent === farmEvent) {
+        activeFarmEvent = null;
+      }
+
+      scheduleEvent();
+    }, FARM_EVENT_DURATION_MS);
+
+    return true;
+  } catch (error) {
+    if (activeFarmEvent === farmEvent) {
+      activeFarmEvent = null;
+    }
+
+    throw error;
+  }
 }
 
 function scheduleEvent() {
@@ -426,12 +515,17 @@ function scheduleEvent() {
   console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
 
   setTimeout(() => {
-    startFarmEvent();
+    startFarmEvent().catch(error => {
+      console.error("Failed to start scheduled Farmer Pets event:", error);
+      scheduleEvent();
+    });
   }, delay);
 }
 
 async function handleRescue(interaction) {
-  if (!activeFarmEvent) {
+  const farmEvent = activeFarmEvent;
+
+  if (!farmEvent) {
     await interaction.reply({
       content: "No active farm emergency.",
       flags: FLAGS_EPHEMERAL
@@ -439,7 +533,7 @@ async function handleRescue(interaction) {
     return;
   }
 
-  if (Date.now() > activeFarmEvent.expires) {
+  if (Date.now() > farmEvent.expires) {
     await interaction.reply({
       content: "This farm emergency has already ended.",
       flags: FLAGS_EPHEMERAL
@@ -447,7 +541,7 @@ async function handleRescue(interaction) {
     return;
   }
 
-  if (activeFarmEvent.players.has(interaction.user.id)) {
+  if (farmEvent.players.has(interaction.user.id)) {
     await interaction.reply({
       content: "You already attempted this rescue.",
       flags: FLAGS_EPHEMERAL
@@ -455,50 +549,70 @@ async function handleRescue(interaction) {
     return;
   }
 
-  const wallet = await getWallet(interaction.user.id);
+  farmEvent.players.add(interaction.user.id);
 
-  if (!wallet) {
+  let attemptRecorded = false;
+
+  try {
+    const wallet = await getWallet(interaction.user.id);
+
+    if (!wallet) {
+      farmEvent.players.delete(interaction.user.id);
+
+      await interaction.reply({
+        content: "You must verify your wallet first using `/verify`.",
+        flags: FLAGS_EPHEMERAL
+      });
+      return;
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    await ensurePlayer(interaction.user.id, wallet);
+
+    const successChance = getSuccessChance(member);
+    const success = Math.random() < successChance;
+    const reward = success
+      ? randomInt(farmEvent.rewardMin, farmEvent.rewardMax)
+      : 0;
+
+    await recordRescue(
+      interaction.user.id,
+      wallet,
+      farmEvent.name,
+      success,
+      reward
+    );
+
+    attemptRecorded = true;
+
     await interaction.reply({
-      content: "You must verify your wallet first using `/verify`.",
+      content: success
+        ? `🌾 Farm Rescue Success!\n\nReward: **${reward} $NKFE**`
+        : "🛡 Rescue Failed.",
       flags: FLAGS_EPHEMERAL
     });
-    return;
+
+    try {
+      const channel = await client.channels.fetch(FARM_CHANNEL);
+
+      if (channel?.isTextBased()) {
+        await channel.send(
+          success
+            ? `🌾 **FARM RESCUE SUCCESS**\n\nFarmer: **${member.displayName}**\nEvent: **${farmEvent.name}**\nReward: **${reward} $NKFE**`
+            : `🛡 **FARM RESCUE FAILED**\n\nFarmer: **${member.displayName}**\nEvent: **${farmEvent.name}**`
+        );
+      }
+    } catch (error) {
+      console.error("Failed to announce Farmer Pets rescue result:", error);
+    }
+  } catch (error) {
+    if (!attemptRecorded) {
+      farmEvent.players.delete(interaction.user.id);
+    }
+
+    throw error;
   }
-
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-
-  await ensurePlayer(interaction.user.id, wallet);
-
-  const successChance = getSuccessChance(member);
-  const success = Math.random() < successChance;
-  const reward = success
-    ? randomInt(activeFarmEvent.rewardMin, activeFarmEvent.rewardMax)
-    : 0;
-
-  activeFarmEvent.players.add(interaction.user.id);
-
-  await recordRescue(
-    interaction.user.id,
-    wallet,
-    activeFarmEvent.name,
-    success,
-    reward
-  );
-
-  await interaction.reply({
-    content: success
-      ? `🌾 Farm Rescue Success!\n\nReward: **${reward} $NKFE**`
-      : "🛡 Rescue Failed.",
-    flags: FLAGS_EPHEMERAL
-  });
-
-  const channel = await client.channels.fetch(FARM_CHANNEL);
-
-  await channel.send(
-    success
-      ? `🌾 **FARM RESCUE SUCCESS**\n\nFarmer: **${member.displayName}**\nEvent: **${activeFarmEvent.name}**\nReward: **${reward} $NKFE**`
-      : `🛡 **FARM RESCUE FAILED**\n\nFarmer: **${member.displayName}**\nEvent: **${activeFarmEvent.name}**`
-  );
 }
 
 // STATS / LEADERBOARD
@@ -670,9 +784,17 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-
   try {
+    if (interaction.isButton()) {
+      if (interaction.customId === RESCUE_BUTTON_CUSTOM_ID) {
+        await handleRescue(interaction);
+      }
+
+      return;
+    }
+
+    if (!interaction.isChatInputCommand()) return;
+
     if (interaction.commandName === "fp-rescue") {
       await handleRescue(interaction);
       return;
@@ -688,7 +810,18 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      const assetData = await getAssets(wallet);
+      let assetData;
+
+      try {
+        assetData = await getAssets(wallet);
+      } catch (error) {
+        console.error("Failed to fetch Farmer Pets assets:", error);
+        await interaction.editReply(
+          "Farmer Pets asset services are unavailable right now. No roles were changed; please try again later."
+        );
+        return;
+      }
+
       const analysis = analyzeAssets(assetData.combinedAssets);
       const member = await interaction.guild.members.fetch(interaction.user.id);
 
@@ -783,10 +916,12 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      await startFarmEvent();
+      const started = await startFarmEvent();
 
       await interaction.reply({
-        content: "Test Farmer Pets event started.",
+        content: started
+          ? "Test Farmer Pets event started."
+          : "A Farmer Pets event is already active.",
         flags: FLAGS_EPHEMERAL
       });
       return;
