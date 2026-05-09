@@ -212,7 +212,8 @@ async function startFarmEvent() {
 function scheduleEvent() {
   const delay = getNextFarmEventDelay();
 
-  console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
+async function handleFarmHelp(interaction) {
+  const farmEvent = activeFarmEvent;
 
   setTimeout(() => {
     startFarmEvent().catch(error => {
