@@ -23,7 +23,9 @@ const ENV_NAMES = [
   "FARMER_FULL_FARM_ROLE_ID",
   "ATOMIC_API",
   "FARMER_PETS_API",
-  "CONTRACT_ACCOUNT"
+  "CONTRACT_ACCOUNT",
+  "HEALTH_PORT",
+  "PORT"
 ];
 
 function withConfigEnv(overrides, callback) {
@@ -63,6 +65,7 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.ATOMIC_API, "https://wax.api.atomicassets.io/atomicassets/v1/assets");
     assert.equal(config.FARMER_PETS_API, "https://pets-api-main.herokuapp.com");
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
+    assert.equal(config.HEALTH_PORT, undefined);
   });
 });
 
@@ -79,7 +82,8 @@ test("config allows deployment environment to override channel, role, and API va
     FARMER_FULL_FARM_ROLE_ID: "full-farm-role-from-env",
     ATOMIC_API: "https://atomic.example.test/assets",
     FARMER_PETS_API: "https://pets.example.test",
-    CONTRACT_ACCOUNT: "contractacct"
+    CONTRACT_ACCOUNT: "contractacct",
+    HEALTH_PORT: "8080"
   }, config => {
     assert.equal(config.FARM_CHANNEL, "farm-channel-from-env");
     assert.equal(config.LEADERBOARD_CHANNEL, "leaderboard-channel-from-env");
@@ -93,6 +97,7 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.ATOMIC_API, "https://atomic.example.test/assets");
     assert.equal(config.FARMER_PETS_API, "https://pets.example.test");
     assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
+    assert.equal(config.HEALTH_PORT, "8080");
   });
 });
 
@@ -103,11 +108,13 @@ test("short channel and role environment names take precedence over ID aliases",
     LEADERBOARD_CHANNEL: "leaderboard-channel-short",
     LEADERBOARD_CHANNEL_ID: "leaderboard-channel-id",
     FARMER_VERIFIED_ROLE: "verified-role-short",
-    FARMER_VERIFIED_ROLE_ID: "verified-role-id"
+    FARMER_VERIFIED_ROLE_ID: "verified-role-id",
+    PORT: "9090"
   }, config => {
     assert.equal(config.FARM_CHANNEL, "farm-channel-short");
     assert.equal(config.LEADERBOARD_CHANNEL, "leaderboard-channel-short");
     assert.equal(config.FARMER_VERIFIED_ROLE, "verified-role-short");
     assert.equal(config.ROLES.verified.id, "verified-role-short");
+    assert.equal(config.HEALTH_PORT, "9090");
   });
 });

@@ -24,6 +24,7 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARM_CHANNEL_ID` | Recommended | Channel for farm event announcements. Defaults to the Farmer Pets production channel. |
 | `LEADERBOARD_CHANNEL_ID` | Recommended | Channel for leaderboard and role-unlock announcements. Defaults to the Farmer Pets production channel. |
 | `FARMER_*_ROLE_ID` | Recommended | Role IDs used by `/fp-roles` and event pings. Defaults to Farmer Pets production roles. |
+| `HEALTH_PORT` or `PORT` | Optional | Starts a lightweight HTTP health endpoint at `/health` for web-service hosts. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
@@ -38,6 +39,10 @@ npm run doctor -- --skip-db
 ```
 
 `npm run check` syntax-checks all JavaScript files. `npm test` runs the syntax check and the Node.js test suite. `npm run doctor -- --skip-db` validates local configuration without opening a database connection.
+
+## Health endpoint
+
+Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP server. `GET /health` returns uptime and active farm-event summary data, which is useful for deployment health checks.
 
 ## Deployment diagnostics
 

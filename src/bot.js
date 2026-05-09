@@ -17,6 +17,7 @@ const { createCommandHandlers } = require("./commands/handlers");
 const { createInteractionHandler } = require("./interactions");
 const { createFarmEventDiscordRuntime } = require("./runtime/farmEventDiscord");
 const { registerClientReadyHandler } = require("./runtime/startup");
+const { createHealthServer } = require("./runtime/healthServer");
 const { createRescueHandlers } = require("./runtime/rescueHandlers");
 const farmEvents = require("./services/farmEvents");
 const database = require("./db");
@@ -67,6 +68,7 @@ function createBotApp({
   runtimes = {
     createCommandHandlers,
     createFarmEventDiscordRuntime,
+    createHealthServer,
     createInteractionHandler,
     createRescueHandlers,
     registerClientReadyHandler
@@ -75,6 +77,10 @@ function createBotApp({
   logger = console
 } = {}) {
   let activeFarmEvent = null;
+  const healthServer = runtimes.createHealthServer({
+    getActiveFarmEvent: () => activeFarmEvent,
+    logger
+  });
   let stopping = false;
   let shutdownHandlersRegistered = false;
 
@@ -212,6 +218,8 @@ function createBotApp({
       await client.destroy();
     }
 
+    await healthServer.stop();
+
     if (typeof db.close === "function") {
       await db.close();
     }
@@ -219,12 +227,14 @@ function createBotApp({
     logger.log("Farmer Pets Bot shutdown complete.");
   }
 
-  function startBot() {
+  async function startBot() {
     assertRuntimeConfig(config);
 
     registerBotReadyHandler();
     registerInteractionHandler();
     registerShutdownHandlers();
+
+    await healthServer.start(config.HEALTH_PORT);
 
     return client.login(config.TOKEN);
   }

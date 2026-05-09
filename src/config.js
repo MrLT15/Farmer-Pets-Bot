@@ -6,6 +6,7 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
+const HEALTH_PORT = process.env.HEALTH_PORT || process.env.PORT;
 
 const FARM_CHANNEL = env("FARM_CHANNEL", env("FARM_CHANNEL_ID", "1270948980615938109"));
 const LEADERBOARD_CHANNEL = env(
@@ -67,6 +68,7 @@ module.exports = {
   CLIENT_ID,
   GUILD_ID,
   DATABASE_URL,
+  HEALTH_PORT,
   FARM_CHANNEL,
   LEADERBOARD_CHANNEL,
   FARMER_VERIFIED_ROLE,

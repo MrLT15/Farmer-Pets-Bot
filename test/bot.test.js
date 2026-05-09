@@ -64,6 +64,7 @@ function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {
       CLIENT_ID: "client-id",
       GUILD_ID: "guild-id",
       DATABASE_URL: "postgres://user:password@host/db",
+      HEALTH_PORT: "8080",
       FARM_CHANNEL: "farm-channel",
       LEADERBOARD_CHANNEL: "leaderboard-channel",
       FARMER_VERIFIED_ROLE: "verified-role",
@@ -127,6 +128,13 @@ function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {
         captures.commandHandlerOptions = options;
         return { "fp-test": async () => {} };
       },
+      createHealthServer: options => {
+        captures.healthServerOptions = options;
+        return {
+          start: async port => calls.push(["health.start", port]),
+          stop: async () => calls.push(["health.stop"])
+        };
+      },
       createFarmEventDiscordRuntime: options => {
         captures.farmEventOptions = options;
         return {
@@ -168,12 +176,12 @@ test("getMissingRuntimeConfig reports all missing deployment settings", () => {
   ]);
 });
 
-test("startBot fails before registering handlers when deployment settings are missing", () => {
+test("startBot fails before registering handlers when deployment settings are missing", async () => {
   const { app, client } = createBotAppFixture({
     config: { TOKEN: undefined }
   });
 
-  assert.throws(
+  await assert.rejects(
     () => app.startBot(),
     /Missing required Farmer Pets configuration: DISCORD_TOKEN/
   );
@@ -182,17 +190,19 @@ test("startBot fails before registering handlers when deployment settings are mi
 });
 
 test("createBotApp wires runtime dependencies and logs in with configured token", async () => {
-  const { app, captures, client, processLike } = createBotAppFixture();
+  const { app, calls, captures, client, processLike } = createBotAppFixture();
 
   const loginResult = await app.startBot();
 
   assert.equal(loginResult, "logged-in");
   assert.deepEqual(client.loginCalls, ["discord-token"]);
+  assert.deepEqual(calls, [["health.start", "8080"]]);
   assert.equal(captures.readyHandlerOptions.clientId, "client-id");
   assert.equal(captures.readyHandlerOptions.guildId, "guild-id");
   assert.deepEqual(captures.readyHandlerOptions.commands, [{ name: "fp-test" }]);
   assert.equal(captures.farmEventOptions.farmChannelId, "farm-channel");
   assert.equal(captures.farmEventOptions.farmerVerifiedRoleId, "verified-role");
+  assert.equal(captures.healthServerOptions.getActiveFarmEvent(), null);
   assert.equal(captures.rescueHandlerOptions.flagsEphemeral, 64);
   assert.equal(captures.commandHandlerOptions.flagsEphemeral, 64);
   assert.equal(captures.interactionHandlerOptions.handleRescue, captures.commandHandlerOptions.handleRescue);
@@ -236,7 +246,7 @@ test("stop destroys the Discord client and closes the database once", async () =
   await app.stop({ signal: "SIGINT" });
 
   assert.equal(client.destroyCalls, 1);
-  assert.deepEqual(calls, [["db.close"]]);
+  assert.deepEqual(calls, [["health.stop"], ["db.close"]]);
   assert.deepEqual(logs, [
     ["log", "Received SIGTERM; shutting down Farmer Pets Bot."],
     ["log", "Farmer Pets Bot shutdown complete."]
@@ -254,6 +264,6 @@ test("shutdown signal handler stops resources and exits cleanly", async () => {
   await processLike.handlers.SIGTERM();
 
   assert.equal(client.destroyCalls, 1);
-  assert.deepEqual(calls, [["db.close"]]);
+  assert.deepEqual(calls, [["health.stop"], ["db.close"]]);
   assert.deepEqual(processLike.exitCodes, [0]);
 });
