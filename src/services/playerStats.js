@@ -1,128 +1,134 @@
-const { FLAGS_EPHEMERAL, LEADERBOARD_CHANNEL } = require("../config");
-const {
-  ensurePlayer,
-  getDailyCheckInState,
-  getPayoutRows,
-  getStatsRow,
-  getWallet,
-  getWeeklyLeaderboardRows,
-  recordDailyCheckIn,
-  resetWeeklyStats
-} = require("../db");
-const { getPacificDateKey, getYesterdayPacificDateKey } = require("../utils/dates");
-const { calculateDailyReward } = require("../utils/rewards");
-const embedBuilders = require("../ui/embeds");
+const defaultConfig = require("../config");
+const defaultDb = require("../db");
+const defaultDates = require("../utils/dates");
+const defaultRewards = require("../utils/rewards");
+const defaultEmbedBuilders = require("../ui/embeds");
 
-async function handleDailyCheckIn(interaction) {
-  const wallet = await getWallet(interaction.user.id);
+function createPlayerStatsService({
+  config = defaultConfig,
+  db = defaultDb,
+  dates = defaultDates,
+  rewards = defaultRewards,
+  embedBuilders = defaultEmbedBuilders
+} = {}) {
+  async function handleDailyCheckIn(interaction) {
+    const wallet = await db.getWallet(interaction.user.id);
 
-  if (!wallet) {
+    if (!wallet) {
+      await interaction.reply({
+        content: "No verified wallet found. Please verify your wallet first using `/verify`.",
+        flags: config.FLAGS_EPHEMERAL
+      });
+      return;
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    const todayKey = dates.getPacificDateKey();
+    const yesterdayKey = dates.getYesterdayPacificDateKey();
+
+    await db.ensurePlayer(interaction.user.id, wallet);
+
+    const fpDailyCheckInState = await db.getDailyCheckInState(interaction.user.id);
+    const fpDailyLastCheckInKey = fpDailyCheckInState.last_daily_checkin_key;
+
+    if (fpDailyLastCheckInKey === todayKey) {
+      await interaction.reply({
+        embeds: [embedBuilders.buildAlreadyCheckedInEmbed({
+          displayName: member.displayName,
+          lastDailyCheckIn: fpDailyLastCheckInKey,
+          streak: Number(fpDailyCheckInState.daily_streak || 0)
+        })],
+        flags: config.FLAGS_EPHEMERAL
+      });
+      return;
+    }
+
+    const streak = fpDailyLastCheckInKey === yesterdayKey
+      ? Number(fpDailyCheckInState.daily_streak || 0) + 1
+      : 1;
+    const reward = rewards.calculateDailyReward(streak);
+
+    const updated = await db.recordDailyCheckIn(interaction.user.id, reward.total, streak, todayKey);
+
     await interaction.reply({
-      content: "No verified wallet found. Please verify your wallet first using `/verify`.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-  const todayKey = getPacificDateKey();
-  const yesterdayKey = getYesterdayPacificDateKey();
-
-  await ensurePlayer(interaction.user.id, wallet);
-
-  const fpDailyCheckInState = await getDailyCheckInState(interaction.user.id);
-  const fpDailyLastCheckInKey = fpDailyCheckInState.last_daily_checkin_key;
-
-  if (fpDailyLastCheckInKey === todayKey) {
-    await interaction.reply({
-      embeds: [embedBuilders.buildAlreadyCheckedInEmbed({
+      embeds: [embedBuilders.buildDailyCheckInEmbed({
         displayName: member.displayName,
-        lastDailyCheckIn: fpDailyLastCheckInKey,
-        streak: Number(fpDailyCheckInState.daily_streak || 0)
+        wallet,
+        streak: Number(updated.daily_streak || 0),
+        bestStreak: Number(updated.best_daily_streak || 0),
+        reward,
+        todayKey
       })],
-      flags: FLAGS_EPHEMERAL
+      flags: config.FLAGS_EPHEMERAL
     });
-    return;
   }
 
-  const streak = fpDailyLastCheckInKey === yesterdayKey
-    ? Number(fpDailyCheckInState.daily_streak || 0) + 1
-    : 1;
-  const reward = calculateDailyReward(streak);
+  async function buildStatsPayload(discordId, displayName) {
+    const wallet = await db.getWallet(discordId);
 
-  const updated = await recordDailyCheckIn(interaction.user.id, reward.total, streak, todayKey);
+    if (!wallet) {
+      return {
+        content: "No verified wallet found. Please verify your wallet first using `/verify`."
+      };
+    }
 
-  await interaction.reply({
-    embeds: [embedBuilders.buildDailyCheckInEmbed({
-      displayName: member.displayName,
-      wallet,
-      streak: Number(updated.daily_streak || 0),
-      bestStreak: Number(updated.best_daily_streak || 0),
-      reward,
-      todayKey
-    })],
-    flags: FLAGS_EPHEMERAL
-  });
-}
+    await db.ensurePlayer(discordId, wallet);
 
-async function buildStatsPayload(discordId, displayName) {
-  const wallet = await getWallet(discordId);
+    const row = await db.getStatsRow(discordId);
 
-  if (!wallet) {
-    return {
-      content: "No verified wallet found. Please verify your wallet first using `/verify`."
-    };
+    return { embeds: [embedBuilders.buildStatsEmbed({ displayName, row, wallet })] };
   }
 
-  await ensurePlayer(discordId, wallet);
+  async function buildLeaderboardMessage() {
+    const rows = await db.getWeeklyLeaderboardRows();
 
-  const row = await getStatsRow(discordId);
+    if (!rows.length) {
+      return "🏆 **Farmer Pets Weekly Leaderboard**\n\nNo Farmer Pets rescue activity this week.";
+    }
 
-  return { embeds: [embedBuilders.buildStatsEmbed({ displayName, row, wallet })] };
-}
+    const lines = rows.map((row, index) => {
+      return (
+        `${index + 1}. <@${row.discord_id}> — ` +
+        `**${row.weekly_nkfe} $NKFE** | ` +
+        `${row.weekly_successes}/${row.weekly_attempts} successful | ` +
+        `Lifetime: ${row.lifetime_nkfe} $NKFE | Wallet: **${row.wallet}**`
+      );
+    });
 
-async function buildLeaderboardMessage() {
-  const rows = await getWeeklyLeaderboardRows();
-
-  if (!rows.length) {
-    return "🏆 **Farmer Pets Weekly Leaderboard**\n\nNo Farmer Pets rescue activity this week.";
+    return "🏆 **Farmer Pets Weekly Leaderboard**\n\n" + lines.join("\n");
   }
 
-  const lines = rows.map((row, index) => {
-    return (
-      `${index + 1}. <@${row.discord_id}> — ` +
-      `**${row.weekly_nkfe} $NKFE** | ` +
-      `${row.weekly_successes}/${row.weekly_attempts} successful | ` +
-      `Lifetime: ${row.lifetime_nkfe} $NKFE | Wallet: **${row.wallet}**`
+  async function postWeeklyLeaderboardAndReset(client) {
+    const channel = await client.channels.fetch(config.LEADERBOARD_CHANNEL);
+    const leaderboard = await buildLeaderboardMessage();
+
+    const payoutRows = await db.getPayoutRows();
+
+    const totalPayout = payoutRows.reduce(
+      (sum, row) => sum + Number(row.payout_nkfe || 0),
+      0
     );
-  });
 
-  return "🏆 **Farmer Pets Weekly Leaderboard**\n\n" + lines.join("\n");
+    await channel.send(
+      `${leaderboard}\n\n` +
+      `💰 **Total Farmer Pets NKFE Owed:** ${totalPayout} $NKFE\n\n` +
+      `Use **/fp-payouts** for the manual payout list.`
+    );
+
+    await db.resetWeeklyStats();
+  }
+
+  return {
+    buildLeaderboardMessage,
+    buildStatsPayload,
+    handleDailyCheckIn,
+    postWeeklyLeaderboardAndReset
+  };
 }
 
-async function postWeeklyLeaderboardAndReset(client) {
-  const channel = await client.channels.fetch(LEADERBOARD_CHANNEL);
-  const leaderboard = await buildLeaderboardMessage();
-
-  const payoutRows = await getPayoutRows();
-
-  const totalPayout = payoutRows.reduce(
-    (sum, row) => sum + Number(row.payout_nkfe || 0),
-    0
-  );
-
-  await channel.send(
-    `${leaderboard}\n\n` +
-    `💰 **Total Farmer Pets NKFE Owed:** ${totalPayout} $NKFE\n\n` +
-    `Use **/fp-payouts** for the manual payout list.`
-  );
-
-  await resetWeeklyStats();
-}
+const playerStatsService = createPlayerStatsService();
 
 module.exports = {
-  buildLeaderboardMessage,
-  buildStatsPayload,
-  handleDailyCheckIn,
-  postWeeklyLeaderboardAndReset
+  createPlayerStatsService,
+  ...playerStatsService
 };
