@@ -30,22 +30,29 @@ const {
   ATOMIC_ASSET_PAGE_LIMIT,
   RESCUE_BUTTON_CUSTOM_ID,
   HELP_FARM_BUTTON_CUSTOM_ID,
-  PACIFIC_TIME_ZONE,
   COMMUNITY_EVENT_CHANCE,
   COMMUNITY_GOAL_MIN,
   COMMUNITY_GOAL_MAX,
   COMMUNITY_BONUS_MIN,
   COMMUNITY_BONUS_MAX,
   COMMUNITY_HELPS_PER_PROGRESS,
-  EMBED_COLORS,
   ROLES
 } = require("./src/config");
 const { randomInt } = require("./src/utils/random");
-const { formatNumber, formatPercent } = require("./src/utils/format");
 const { getPacificDateKey, getYesterdayPacificDateKey } = require("./src/utils/dates");
 const { calculateDailyReward } = require("./src/utils/rewards");
-const { makeProgressBar } = require("./src/utils/progress");
 const { getEventAnnouncementTarget } = require("./src/utils/events");
+const { buildRescueButtonRow } = require("./src/ui/buttons");
+const {
+  buildAlreadyCheckedInEmbed,
+  buildCommunityEventEndEmbed,
+  buildCommunityGoalReachedEmbed,
+  buildDailyCheckInEmbed,
+  buildFarmEventEmbed,
+  buildFarmHelpEmbed,
+  buildRescueResultEmbed,
+  buildStatsEmbed
+} = require("./src/ui/embeds");
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -683,23 +690,6 @@ function buildAlreadyCheckedInEmbed({ displayName, lastDailyCheckIn, streak }) {
 
 // FARM EVENTS
 
-function buildRescueButtonRow(disabled = false) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(RESCUE_BUTTON_CUSTOM_ID)
-      .setLabel(disabled ? "Event Ended" : "Rescue Pet")
-      .setStyle(ButtonStyle.Success)
-      .setEmoji("🌾")
-      .setDisabled(disabled),
-    new ButtonBuilder()
-      .setCustomId(HELP_FARM_BUTTON_CUSTOM_ID)
-      .setLabel(disabled ? "Help Closed" : "Help the Farm")
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji("🧑‍🌾")
-      .setDisabled(disabled)
-  );
-}
-
 async function createEventThread(message, farmEvent) {
   try {
     if (!message?.startThread) return null;
@@ -1187,68 +1177,8 @@ async function buildStatsPayload(discordId, displayName) {
   );
 
   const row = res.rows[0];
-  const attempts = Number(row.total_attempts || 0);
-  const successes = Number(row.total_successes || 0);
-  const successRate = attempts ? successes / attempts : 0;
-  const weeklyAttempts = Number(row.weekly_attempts || 0);
-  const weeklySuccesses = Number(row.weekly_successes || 0);
-  const weeklySuccessRate = weeklyAttempts ? weeklySuccesses / weeklyAttempts : 0;
 
-  const embed = new EmbedBuilder()
-    .setColor(EMBED_COLORS.info)
-    .setTitle("🌾 Farmer Pets Stats")
-    .setDescription(`Stats for **${displayName}**`)
-    .addFields(
-      { name: "Wallet", value: `**${wallet}**`, inline: false },
-      {
-        name: "💰 NKFE",
-        value: [
-          `Payout Owed: **${formatNumber(row.payout_nkfe)} $NKFE**`,
-          `Weekly: **${formatNumber(row.weekly_nkfe)} $NKFE**`,
-          `Lifetime: **${formatNumber(row.lifetime_nkfe)} $NKFE**`
-        ].join("\n"),
-        inline: true
-      },
-      {
-        name: "🛡 Rescue Record",
-        value: [
-          `Attempts: **${formatNumber(attempts)}**`,
-          `Successes: **${formatNumber(successes)}**`,
-          `Success Rate: **${formatPercent(successRate)}**`
-        ].join("\n"),
-        inline: true
-      },
-      {
-        name: "🏆 Weekly Rescue",
-        value: [
-          `Attempts: **${formatNumber(weeklyAttempts)}**`,
-          `Successes: **${formatNumber(weeklySuccesses)}**`,
-          `Success Rate: **${formatPercent(weeklySuccessRate)}**`
-        ].join("\n"),
-        inline: true
-      },
-      {
-        name: "🔥 Rescue Streaks",
-        value: [
-          `Current: **${formatNumber(row.current_rescue_streak)}**`,
-          `Best: **${formatNumber(row.best_rescue_streak)}**`
-        ].join("\n"),
-        inline: true
-      },
-      {
-        name: "🌞 Daily Check-In",
-        value: [
-          `Current: **${formatNumber(row.daily_streak)} day(s)**`,
-          `Best: **${formatNumber(row.best_daily_streak)} day(s)**`,
-          `Last: **${row.last_daily_checkin_key || "Never"}**`
-        ].join("\n"),
-        inline: true
-      }
-    )
-    .setFooter({ text: `Daily reset uses ${PACIFIC_TIME_ZONE}.` })
-    .setTimestamp();
-
-  return { embeds: [embed] };
+  return { embeds: [buildStatsEmbed({ displayName, row, wallet })] };
 }
 
 async function buildLeaderboardMessage() {
