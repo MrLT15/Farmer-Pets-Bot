@@ -4,7 +4,11 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const cron = require("node-cron");
@@ -400,7 +404,7 @@ async function handleFarmHelp(interaction) {
 
   if (!farmHelpWallet) {
     await interaction.reply({
-      content: "You must verify your wallet first using `/verify`.",
+      content: "No active farm emergency.",
       flags: FLAGS_EPHEMERAL
     });
     return;
