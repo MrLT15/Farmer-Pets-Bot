@@ -1,5 +1,7 @@
 # Farmer Pets Discord Bot
 
+[![CI](https://github.com/MrLT15/Farmer-Pets-Bot/actions/workflows/ci.yml/badge.svg)](https://github.com/MrLT15/Farmer-Pets-Bot/actions/workflows/ci.yml)
+
 A standalone Discord bot for Farmer Pets wallet-based roles, farm rescue events, daily check-ins, leaderboards, and manual $NKFE payout reporting.
 
 ## Requirements
