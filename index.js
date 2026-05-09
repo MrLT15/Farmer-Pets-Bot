@@ -4,7 +4,11 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const cron = require("node-cron");
@@ -378,7 +382,84 @@ async function handleFarmHelp(interaction) {
 async function handleDailyCheckIn(interaction) {
   const wallet = await getWallet(interaction.user.id);
 
-  if (!wallet) {
+  let attemptRecorded = false;
+
+  try {
+    const wallet = await getWallet(interaction.user.id);
+
+    if (!wallet) {
+      farmEvent.players.delete(interaction.user.id);
+
+      await interaction.reply({
+        content: "You must verify your wallet first using `/verify`.",
+        flags: FLAGS_EPHEMERAL
+      });
+      return;
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    await ensurePlayer(interaction.user.id, wallet);
+
+    const successChance = getSuccessChance(member);
+    const success = Math.random() < successChance;
+    const reward = success
+      ? randomInt(farmEvent.rewardMin, farmEvent.rewardMax)
+      : 0;
+
+    const streak = await recordRescue(
+      interaction.user.id,
+      wallet,
+      farmEvent.name,
+      success,
+      reward
+    );
+
+    if (farmEvent.isCommunity && success) {
+      farmEvent.communitySuccesses++;
+      await updateFarmEventMessage(farmEvent);
+      await announceCommunityGoalReached(farmEvent);
+    }
+
+    attemptRecorded = true;
+
+    const resultEmbed = embedBuilders.buildRescueResultEmbed({
+      member,
+      farmEvent,
+      success,
+      reward,
+      successChance,
+      streak
+    });
+
+    await interaction.reply({
+      embeds: [resultEmbed],
+      flags: FLAGS_EPHEMERAL
+    });
+
+    try {
+      const target = getEventAnnouncementTarget(farmEvent);
+
+      if (target?.isTextBased()) {
+        await target.send({ embeds: [resultEmbed] });
+      }
+    } catch (error) {
+      console.error("Failed to announce Farmer Pets rescue result:", error);
+    }
+  } catch (error) {
+    if (!attemptRecorded) {
+      farmEvent.players.delete(interaction.user.id);
+    }
+
+    throw error;
+  }
+}
+
+
+async function handleFarmHelp(interaction) {
+  const farmEvent = activeFarmEvent;
+
+  if (!farmEvent) {
     await interaction.reply({
       content: "No verified wallet found. Please verify your wallet first using `/verify`.",
       flags: FLAGS_EPHEMERAL
@@ -390,7 +471,13 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  await ensurePlayer(interaction.user.id, wallet);
+  if (farmEvent.helpers.has(interaction.user.id)) {
+    await interaction.reply({
+      content: "You already helped the farm during this event.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
 
   const fpDailyCheckInState = await getDailyCheckInState(interaction.user.id);
   const fpDailyLastCheckInKey = fpDailyCheckInState.last_daily_checkin_key;
