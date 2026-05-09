@@ -2,13 +2,7 @@ const {
   Client,
   GatewayIntentBits,
   REST,
-  Routes,
-  SlashCommandBuilder,
-  PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder
+  Routes
 } = require("discord.js");
 
 const cron = require("node-cron");
@@ -20,9 +14,7 @@ const {
   FARM_CHANNEL,
   LEADERBOARD_CHANNEL,
   FARMER_VERIFIED_ROLE,
-  FLAGS_EPHEMERAL,
-  RESCUE_BUTTON_CUSTOM_ID,
-  HELP_FARM_BUTTON_CUSTOM_ID
+  FLAGS_EPHEMERAL
 } = require("./src/config");
 const { getPacificDateKey, getYesterdayPacificDateKey } = require("./src/utils/dates");
 const { calculateDailyReward } = require("./src/utils/rewards");
@@ -31,6 +23,9 @@ const { buildRescueButtonRow } = require("./src/ui/buttons");
 const embedBuilders = require("./src/ui/embeds");
 const { getAssets } = require("./src/services/assets");
 const { analyzeAssets, getSuccessChance, syncRoles } = require("./src/services/roles");
+const { commands } = require("./src/commands/definitions");
+const { createCommandHandlers } = require("./src/commands/handlers");
+const { createInteractionHandler } = require("./src/interactions");
 const {
   createFarmEvent,
   getEventThreadIntro,
@@ -433,34 +428,6 @@ async function handleDailyCheckIn(interaction) {
     });
 
     await interaction.reply({
-      embeds: [resultEmbed],
-      flags: FLAGS_EPHEMERAL
-    });
-
-    try {
-      const target = getEventAnnouncementTarget(farmEvent);
-
-      if (target?.isTextBased()) {
-        await target.send({ embeds: [resultEmbed] });
-      }
-    } catch (error) {
-      console.error("Failed to announce Farmer Pets rescue result:", error);
-    }
-  } catch (error) {
-    if (!attemptRecorded) {
-      farmEvent.players.delete(interaction.user.id);
-    }
-
-    throw error;
-  }
-}
-
-
-async function handleFarmHelp(interaction) {
-  const farmEvent = activeFarmEvent;
-
-  if (!farmEvent) {
-    await interaction.reply({
       content: "No verified wallet found. Please verify your wallet first using `/verify`.",
       flags: FLAGS_EPHEMERAL
     });
@@ -569,45 +536,6 @@ async function postWeeklyLeaderboardAndReset() {
   await resetWeeklyStats();
 }
 
-// COMMANDS
-
-const commands = [
-  new SlashCommandBuilder()
-    .setName("fp-roles")
-    .setDescription("Sync Farmer Pets roles"),
-
-  new SlashCommandBuilder()
-    .setName("fp-rescue")
-    .setDescription("Join the current farm rescue event"),
-
-  new SlashCommandBuilder()
-    .setName("fp-stats")
-    .setDescription("Show your Farmer Pets rescue stats"),
-
-  new SlashCommandBuilder()
-    .setName("fp-daily")
-    .setDescription("Claim your daily Farmer Pets check-in reward"),
-
-  new SlashCommandBuilder()
-    .setName("fp-leaderboard")
-    .setDescription("Show the Farmer Pets weekly leaderboard"),
-
-  new SlashCommandBuilder()
-    .setName("fp-payouts")
-    .setDescription("Admin: show Farmer Pets NKFE payouts owed")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-  new SlashCommandBuilder()
-    .setName("fp-resetpayouts")
-    .setDescription("Admin: reset Farmer Pets payout balances after manual payment")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-  new SlashCommandBuilder()
-    .setName("fp-testevent")
-    .setDescription("Admin: manually start a Farmer Pets event")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-].map(c => c.toJSON());
-
 client.once("clientReady", async () => {
   console.log(`Farmer Pets Bot online as ${client.user.tag}`);
 
@@ -651,169 +579,27 @@ client.once("clientReady", async () => {
   }
 });
 
-client.on("interactionCreate", async interaction => {
-  try {
-    if (interaction.isButton()) {
-      if (interaction.customId === RESCUE_BUTTON_CUSTOM_ID) {
-        await handleRescue(interaction);
-        return;
-      }
-
-      if (interaction.customId === HELP_FARM_BUTTON_CUSTOM_ID) {
-        await handleFarmHelp(interaction);
-        return;
-      }
-
-      return;
-    }
-
-    if (!interaction.isChatInputCommand()) return;
-
-    if (interaction.commandName === "fp-rescue") {
-      await handleRescue(interaction);
-      return;
-    }
-
-    if (interaction.commandName === "fp-roles") {
-      await interaction.deferReply({ flags: FLAGS_EPHEMERAL });
-
-      const wallet = await getWallet(interaction.user.id);
-
-      if (!wallet) {
-        await interaction.editReply("Verify your wallet first using `/verify`.");
-        return;
-      }
-
-      let assetData;
-
-      try {
-        assetData = await getAssets(wallet);
-      } catch (error) {
-        console.error("Failed to fetch Farmer Pets assets:", error);
-        await interaction.editReply(
-          "Farmer Pets asset services are unavailable right now. No roles were changed; please try again later."
-        );
-        return;
-      }
-
-      const analysis = analyzeAssets(assetData.combinedAssets);
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-
-      const roleResult = await syncRoles(member, analysis);
-
-      if (roleResult.added.length) {
-        await announceNewFarmerRoles(member, wallet, roleResult.added);
-      }
-
-      await interaction.editReply(
-        `🌾 **Farmer Pets Role Scan Complete**\n\n` +
-        `Wallet: **${wallet}**\n\n` +
-        `Wallet NFTs Found: **${assetData.walletAssets.length}**\n` +
-        `Staked/In-Game Assets Found: **${assetData.stakedAssets.length}**\n` +
-        `Total Assets Evaluated: **${analysis.total}**\n\n` +
-        `🥫 Food Assets: **${analysis.food}**\n` +
-        `🪵 Wood Assets: **${analysis.wood}**\n` +
-        `🥈 Silver Assets: **${analysis.silver}**\n` +
-        `🛠️ Tool Assets: **${analysis.tool}**\n\n` +
-        `**Roles Added:**\n${roleResult.added.length ? roleResult.added.join("\n") : "None"}\n\n` +
-        `**Roles Removed:**\n${roleResult.removed.length ? roleResult.removed.join("\n") : "None"}`
-      );
-      return;
-    }
-
-    if (interaction.commandName === "fp-stats") {
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-      const payload = await buildStatsPayload(interaction.user.id, member.displayName);
-
-      await interaction.reply({
-        ...payload,
-        flags: FLAGS_EPHEMERAL
-      });
-      return;
-    }
-
-    if (interaction.commandName === "fp-daily") {
-      await handleDailyCheckIn(interaction);
-      return;
-    }
-
-    if (interaction.commandName === "fp-leaderboard") {
-      const message = await buildLeaderboardMessage();
-
-      await interaction.reply({
-        content: message
-      });
-      return;
-    }
-
-    if (interaction.commandName === "fp-payouts") {
-      const payoutRows = await getPayoutRows();
-
-      if (!payoutRows.length) {
-        await interaction.reply({
-          content: "No Farmer Pets NKFE payouts owed right now.",
-          flags: FLAGS_EPHEMERAL
-        });
-        return;
-      }
-
-      const lines = payoutRows.map(row =>
-        `${row.wallet} — **${row.payout_nkfe} $NKFE** — <@${row.discord_id}>`
-      );
-
-      await interaction.reply({
-        content:
-          "💰 **Farmer Pets Manual Payout List**\n\n" +
-          lines.join("\n") +
-          "\n\nAfter manual payment, run `/fp-resetpayouts`.",
-        flags: FLAGS_EPHEMERAL
-      });
-      return;
-    }
-
-    if (interaction.commandName === "fp-resetpayouts") {
-      await resetPayouts();
-
-      await interaction.reply({
-        content: "Farmer Pets payout balances reset to 0. Lifetime stats were preserved.",
-        flags: FLAGS_EPHEMERAL
-      });
-      return;
-    }
-
-    if (interaction.commandName === "fp-testevent") {
-      await interaction.deferReply({ flags: FLAGS_EPHEMERAL });
-
-      if (activeFarmEvent) {
-        await interaction.editReply("A Farmer Pets event is already active.");
-        return;
-      }
-
-      const started = await startFarmEvent();
-
-      await interaction.editReply(
-        started
-          ? "Test Farmer Pets event started."
-          : "A Farmer Pets event is already active."
-      );
-      return;
-    }
-  } catch (error) {
-    console.error(error);
-
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply("Something went wrong.");
-      } else {
-        await interaction.reply({
-          content: "Something went wrong.",
-          flags: FLAGS_EPHEMERAL
-        });
-      }
-    } catch {
-      console.log("Could not send error reply to interaction.");
-    }
-  }
+const commandHandlers = createCommandHandlers({
+  announceNewFarmerRoles,
+  analyzeAssets,
+  buildLeaderboardMessage,
+  buildStatsPayload,
+  flagsEphemeral: FLAGS_EPHEMERAL,
+  getAssets,
+  getPayoutRows,
+  getWallet,
+  getActiveFarmEvent: () => activeFarmEvent,
+  handleDailyCheckIn,
+  handleRescue,
+  resetPayouts,
+  startFarmEvent,
+  syncRoles
 });
+
+client.on("interactionCreate", createInteractionHandler({
+  commandHandlers,
+  handleFarmHelp,
+  handleRescue
+}));
 
 client.login(TOKEN);
