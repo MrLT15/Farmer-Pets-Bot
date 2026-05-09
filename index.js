@@ -372,70 +372,81 @@ async function handleFarmHelp(interaction) {
   }
 }
 
-client.once("clientReady", async () => {
-  console.log(`Farmer Pets Bot online as ${client.user.tag}`);
+function registerClientReadyHandler() {
+  client.once("clientReady", async () => {
+    console.log(`Farmer Pets Bot online as ${client.user.tag}`);
 
-  try {
-    await initDatabase();
+    try {
+      await initDatabase();
 
-    const rest = new REST({ version: "10" }).setToken(TOKEN);
+      const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-
-    console.log("Farmer Pets slash commands registered.");
-
-    scheduleEvent();
-
-    cron.schedule(
-      "0 17 * * 0",
-      async () => {
-        try {
-          await postWeeklyLeaderboardAndReset(client);
-        } catch (error) {
-          console.error("Failed to post weekly Farmer Pets leaderboard:", error);
-        }
-      },
-      { timezone: "America/Los_Angeles" }
-    );
-
-    console.log("Weekly Farmer Pets leaderboard scheduled for Sundays at 5:00 PM Pacific.");
-  } catch (error) {
-    console.error("Failed during Farmer Pets startup:", error);
-
-    if (error?.code === "28000") {
-      console.error(
-        "PostgreSQL authentication failed. Check DATABASE_URL on Render and ensure the database role is allowed to log in."
+      await rest.put(
+        Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+        { body: commands }
       );
+
+      console.log("Farmer Pets slash commands registered.");
+
+      scheduleEvent();
+
+      cron.schedule(
+        "0 17 * * 0",
+        async () => {
+          try {
+            await postWeeklyLeaderboardAndReset(client);
+          } catch (error) {
+            console.error("Failed to post weekly Farmer Pets leaderboard:", error);
+          }
+        },
+        { timezone: "America/Los_Angeles" }
+      );
+
+      console.log("Weekly Farmer Pets leaderboard scheduled for Sundays at 5:00 PM Pacific.");
+    } catch (error) {
+      console.error("Failed during Farmer Pets startup:", error);
+
+      if (error?.code === "28000") {
+        console.error(
+          "PostgreSQL authentication failed. Check DATABASE_URL on Render and ensure the database role is allowed to log in."
+        );
+      }
+
+      process.exit(1);
     }
+  });
+}
 
-    process.exit(1);
-  }
-});
+function registerInteractionHandler() {
+  const commandHandlers = createCommandHandlers({
+    announceNewFarmerRoles,
+    analyzeAssets,
+    buildLeaderboardMessage,
+    buildStatsPayload,
+    flagsEphemeral: FLAGS_EPHEMERAL,
+    getAssets,
+    getPayoutRows,
+    getWallet,
+    getActiveFarmEvent: () => activeFarmEvent,
+    handleDailyCheckIn,
+    handleRescue,
+    resetPayouts,
+    startFarmEvent,
+    syncRoles
+  });
 
-const commandHandlers = createCommandHandlers({
-  announceNewFarmerRoles,
-  analyzeAssets,
-  buildLeaderboardMessage,
-  buildStatsPayload,
-  flagsEphemeral: FLAGS_EPHEMERAL,
-  getAssets,
-  getPayoutRows,
-  getWallet,
-  getActiveFarmEvent: () => activeFarmEvent,
-  handleDailyCheckIn,
-  handleRescue,
-  resetPayouts,
-  startFarmEvent,
-  syncRoles
-});
+  client.on("interactionCreate", createInteractionHandler({
+    commandHandlers,
+    handleFarmHelp,
+    handleRescue
+  }));
+}
 
-client.on("interactionCreate", createInteractionHandler({
-  commandHandlers,
-  handleFarmHelp,
-  handleRescue
-}));
+function startBot() {
+  registerClientReadyHandler();
+  registerInteractionHandler();
 
-client.login(TOKEN);
+  return client.login(TOKEN);
+}
+
+startBot();
