@@ -1,11 +1,4 @@
-const {
-  Client,
-  GatewayIntentBits,
-  REST,
-  Routes
-} = require("discord.js");
-
-const cron = require("node-cron");
+const { Client, GatewayIntentBits } = require("discord.js");
 
 const {
   TOKEN,
@@ -30,6 +23,8 @@ const {
 const { commands } = require("./commands/definitions");
 const { createCommandHandlers } = require("./commands/handlers");
 const { createInteractionHandler } = require("./interactions");
+const { createFarmEventDiscordRuntime } = require("./runtime/farmEventDiscord");
+const { registerClientReadyHandler } = require("./runtime/startup");
 const {
   createFarmEvent,
   getEventThreadIntro,
@@ -83,144 +78,35 @@ async function announceNewFarmerRoles(member, wallet, addedRoleNames) {
 
 // FARM EVENTS
 
-async function createEventThread(message, farmEvent) {
-  try {
-    if (!message?.startThread) return null;
+const farmEventDiscord = createFarmEventDiscordRuntime({
+  client,
+  farmChannelId: FARM_CHANNEL,
+  farmerVerifiedRoleId: FARMER_VERIFIED_ROLE,
+  awardCommunityMilestoneReward,
+  buildRescueButtonRow,
+  createFarmEvent,
+  embedBuilders,
+  getActiveFarmEvent: () => activeFarmEvent,
+  getEventAnnouncementTarget,
+  getEventThreadIntro,
+  getEventThreadName,
+  getNextFarmEventDelay,
+  getRemainingEventMs,
+  markCommunityGoalAnnounced,
+  markCommunityMilestoneAwarded,
+  setActiveFarmEvent: farmEvent => {
+    activeFarmEvent = farmEvent;
+  },
+  shouldAnnounceCommunityGoal,
+  shouldAwardCommunityMilestone
+});
 
-    return await message.startThread({
-      name: getEventThreadName(farmEvent),
-      autoArchiveDuration: 60,
-      reason: "Farmer Pets event thread"
-    });
-  } catch (error) {
-    console.error("Failed to create Farmer Pets event thread:", error);
-    return null;
-  }
-}
-
-async function updateFarmEventMessage(farmEvent) {
-  try {
-    if (!farmEvent.message?.editable) return;
-
-    await farmEvent.message.edit({
-      content: `<@&${FARMER_VERIFIED_ROLE}>`,
-      embeds: [embedBuilders.buildFarmEventEmbed(farmEvent)],
-      components: [buildRescueButtonRow()]
-    });
-  } catch (error) {
-    console.error("Failed to update Farmer Pets event message:", error);
-  }
-}
-
-async function closeFarmEventMessage(farmEvent) {
-  try {
-    if (!farmEvent.message?.editable) return;
-
-    await farmEvent.message.edit({
-      embeds: [embedBuilders.buildFarmEventEmbed(farmEvent)],
-      components: [buildRescueButtonRow(true)]
-    });
-  } catch (error) {
-    console.error("Failed to close Farmer Pets event message:", error);
-  }
-}
-
-async function announceCommunityGoalReached(farmEvent) {
-  if (!shouldAnnounceCommunityGoal(farmEvent)) return;
-
-  markCommunityGoalAnnounced(farmEvent);
-
-  const target = getEventAnnouncementTarget(farmEvent);
-  if (!target?.isTextBased()) return;
-
-  await target.send({ embeds: [embedBuilders.buildCommunityGoalReachedEmbed(farmEvent)] });
-}
-
-async function endFarmEvent(farmEvent) {
-  if (activeFarmEvent === farmEvent) {
-    activeFarmEvent = null;
-  }
-
-  await closeFarmEventMessage(farmEvent);
-
-  if (!farmEvent.isCommunity) return;
-
-  let rewardedCount = 0;
-
-  if (shouldAwardCommunityMilestone(farmEvent)) {
-    markCommunityMilestoneAwarded(farmEvent);
-    rewardedCount = await awardCommunityMilestoneReward(
-      [...farmEvent.players],
-      farmEvent.communityBonus
-    );
-  }
-
-  const target = getEventAnnouncementTarget(farmEvent);
-  if (target?.isTextBased()) {
-    await target.send({ embeds: [embedBuilders.buildCommunityEventEndEmbed(farmEvent, rewardedCount)] });
-  }
-}
-
-async function startFarmEvent() {
-  if (activeFarmEvent) return false;
-
-  const farmEvent = createFarmEvent();
-
-  activeFarmEvent = farmEvent;
-
-  try {
-    const channel = await client.channels.fetch(FARM_CHANNEL);
-
-    if (!channel?.isTextBased()) {
-      throw new Error(`Farm channel ${FARM_CHANNEL} is not a text channel.`);
-    }
-
-    const pingRole = `<@&${FARMER_VERIFIED_ROLE}>`;
-
-    farmEvent.channel = channel;
-    farmEvent.message = await channel.send({
-      content: pingRole,
-      embeds: [embedBuilders.buildFarmEventEmbed(farmEvent)],
-      components: [buildRescueButtonRow()]
-    });
-    farmEvent.thread = await createEventThread(farmEvent.message, farmEvent);
-
-    if (farmEvent.thread?.isTextBased()) {
-      try {
-        await farmEvent.thread.send(getEventThreadIntro(farmEvent));
-      } catch (error) {
-        console.error("Failed to send Farmer Pets event thread intro:", error);
-      }
-    }
-
-    farmEvent.timeout = setTimeout(() => {
-      endFarmEvent(farmEvent)
-        .catch(error => console.error("Failed to end Farmer Pets event:", error))
-        .finally(() => scheduleEvent());
-    }, getRemainingEventMs(farmEvent));
-
-    return true;
-  } catch (error) {
-    if (activeFarmEvent === farmEvent) {
-      activeFarmEvent = null;
-    }
-
-    throw error;
-  }
-}
-
-function scheduleEvent() {
-  const delay = getNextFarmEventDelay();
-
-  console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
-
-  setTimeout(() => {
-    startFarmEvent().catch(error => {
-      console.error("Failed to start scheduled Farmer Pets event:", error);
-      scheduleEvent();
-    });
-  }, delay);
-}
+const {
+  announceCommunityGoalReached,
+  scheduleEvent,
+  startFarmEvent,
+  updateFarmEventMessage
+} = farmEventDiscord;
 
 async function handleRescue(interaction) {
   const farmEvent = activeFarmEvent;
@@ -371,48 +257,16 @@ async function handleFarmHelp(interaction) {
   }
 }
 
-function registerClientReadyHandler() {
-  client.once("clientReady", async () => {
-    console.log(`Farmer Pets Bot online as ${client.user.tag}`);
-
-    try {
-      await initDatabase();
-
-      const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-      await rest.put(
-        Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-        { body: commands }
-      );
-
-      console.log("Farmer Pets slash commands registered.");
-
-      scheduleEvent();
-
-      cron.schedule(
-        "0 17 * * 0",
-        async () => {
-          try {
-            await postWeeklyLeaderboardAndReset(client);
-          } catch (error) {
-            console.error("Failed to post weekly Farmer Pets leaderboard:", error);
-          }
-        },
-        { timezone: "America/Los_Angeles" }
-      );
-
-      console.log("Weekly Farmer Pets leaderboard scheduled for Sundays at 5:00 PM Pacific.");
-    } catch (error) {
-      console.error("Failed during Farmer Pets startup:", error);
-
-      if (error?.code === "28000") {
-        console.error(
-          "PostgreSQL authentication failed. Check DATABASE_URL on Render and ensure the database role is allowed to log in."
-        );
-      }
-
-      process.exit(1);
-    }
+function registerBotReadyHandler() {
+  registerClientReadyHandler({
+    client,
+    token: TOKEN,
+    clientId: CLIENT_ID,
+    guildId: GUILD_ID,
+    commands,
+    initDatabase,
+    scheduleEvent,
+    postWeeklyLeaderboardAndReset
   });
 }
 
@@ -442,7 +296,7 @@ function registerInteractionHandler() {
 }
 
 function startBot() {
-  registerClientReadyHandler();
+  registerBotReadyHandler();
   registerInteractionHandler();
 
   return client.login(TOKEN);
