@@ -16,13 +16,17 @@ const {
   FARMER_VERIFIED_ROLE,
   FLAGS_EPHEMERAL
 } = require("./src/config");
-const { getPacificDateKey, getYesterdayPacificDateKey } = require("./src/utils/dates");
-const { calculateDailyReward } = require("./src/utils/rewards");
 const { getEventAnnouncementTarget } = require("./src/utils/events");
 const { buildRescueButtonRow } = require("./src/ui/buttons");
 const embedBuilders = require("./src/ui/embeds");
 const { getAssets } = require("./src/services/assets");
 const { analyzeAssets, getSuccessChance, syncRoles } = require("./src/services/roles");
+const {
+  buildLeaderboardMessage,
+  buildStatsPayload,
+  handleDailyCheckIn,
+  postWeeklyLeaderboardAndReset
+} = require("./src/services/playerStats");
 const { commands } = require("./src/commands/definitions");
 const { createCommandHandlers } = require("./src/commands/handlers");
 const { createInteractionHandler } = require("./src/interactions");
@@ -47,16 +51,11 @@ const {
 const {
   awardCommunityMilestoneReward,
   ensurePlayer,
-  getDailyCheckInState,
   getPayoutRows,
-  getStatsRow,
   getWallet,
   initDatabase,
-  recordDailyCheckIn,
   recordRescue,
-  resetPayouts,
-  resetWeeklyStats,
-  getWeeklyLeaderboardRows
+  resetPayouts
 } = require("./src/db");
 
 const client = new Client({
@@ -213,7 +212,8 @@ async function startFarmEvent() {
 function scheduleEvent() {
   const delay = getNextFarmEventDelay();
 
-  console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
+async function handleFarmHelp(interaction) {
+  const farmEvent = activeFarmEvent;
 
   setTimeout(() => {
     startFarmEvent().catch(error => {
@@ -372,170 +372,6 @@ async function handleFarmHelp(interaction) {
   }
 }
 
-// STATS / LEADERBOARD
-
-async function handleDailyCheckIn(interaction) {
-  const wallet = await getWallet(interaction.user.id);
-
-  let attemptRecorded = false;
-
-  try {
-    const wallet = await getWallet(interaction.user.id);
-
-    if (!wallet) {
-      farmEvent.players.delete(interaction.user.id);
-
-      await interaction.reply({
-        content: "You must verify your wallet first using `/verify`.",
-        flags: FLAGS_EPHEMERAL
-      });
-      return;
-    }
-
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-
-    await ensurePlayer(interaction.user.id, wallet);
-
-    const successChance = getSuccessChance(member);
-    const success = Math.random() < successChance;
-    const reward = success
-      ? randomInt(farmEvent.rewardMin, farmEvent.rewardMax)
-      : 0;
-
-    const streak = await recordRescue(
-      interaction.user.id,
-      wallet,
-      farmEvent.name,
-      success,
-      reward
-    );
-
-    if (farmEvent.isCommunity && success) {
-      farmEvent.communitySuccesses++;
-      await updateFarmEventMessage(farmEvent);
-      await announceCommunityGoalReached(farmEvent);
-    }
-
-    attemptRecorded = true;
-
-    const resultEmbed = embedBuilders.buildRescueResultEmbed({
-      member,
-      farmEvent,
-      success,
-      reward,
-      successChance,
-      streak
-    });
-
-    await interaction.reply({
-      content: "No verified wallet found. Please verify your wallet first using `/verify`.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-  const todayKey = getPacificDateKey();
-  const yesterdayKey = getYesterdayPacificDateKey();
-
-  if (farmEvent.helpers.has(interaction.user.id)) {
-    await interaction.reply({
-      content: "You already helped the farm during this event.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const fpDailyCheckInState = await getDailyCheckInState(interaction.user.id);
-  const fpDailyLastCheckInKey = fpDailyCheckInState.last_daily_checkin_key;
-
-  if (fpDailyLastCheckInKey === todayKey) {
-    await interaction.reply({
-      embeds: [embedBuilders.buildAlreadyCheckedInEmbed({
-        displayName: member.displayName,
-        lastDailyCheckIn: fpDailyLastCheckInKey,
-        streak: Number(fpDailyCheckInState.daily_streak || 0)
-      })],
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const streak = fpDailyLastCheckInKey === yesterdayKey
-    ? Number(fpDailyCheckInState.daily_streak || 0) + 1
-    : 1;
-  const reward = calculateDailyReward(streak);
-
-  const updated = await recordDailyCheckIn(interaction.user.id, reward.total, streak, todayKey);
-
-  await interaction.reply({
-    embeds: [embedBuilders.buildDailyCheckInEmbed({
-      displayName: member.displayName,
-      wallet,
-      streak: Number(updated.daily_streak || 0),
-      bestStreak: Number(updated.best_daily_streak || 0),
-      reward,
-      todayKey
-    })],
-    flags: FLAGS_EPHEMERAL
-  });
-}
-
-async function buildStatsPayload(discordId, displayName) {
-  const wallet = await getWallet(discordId);
-
-  if (!wallet) {
-    return {
-      content: "No verified wallet found. Please verify your wallet first using `/verify`."
-    };
-  }
-
-  await ensurePlayer(discordId, wallet);
-
-  const row = await getStatsRow(discordId);
-
-  return { embeds: [embedBuilders.buildStatsEmbed({ displayName, row, wallet })] };
-}
-
-async function buildLeaderboardMessage() {
-  const rows = await getWeeklyLeaderboardRows();
-
-  if (!rows.length) {
-    return "🏆 **Farmer Pets Weekly Leaderboard**\n\nNo Farmer Pets rescue activity this week.";
-  }
-
-  const lines = rows.map((row, index) => {
-    return (
-      `${index + 1}. <@${row.discord_id}> — ` +
-      `**${row.weekly_nkfe} $NKFE** | ` +
-      `${row.weekly_successes}/${row.weekly_attempts} successful | ` +
-      `Lifetime: ${row.lifetime_nkfe} $NKFE | Wallet: **${row.wallet}**`
-    );
-  });
-
-  return "🏆 **Farmer Pets Weekly Leaderboard**\n\n" + lines.join("\n");
-}
-
-async function postWeeklyLeaderboardAndReset() {
-  const channel = await client.channels.fetch(LEADERBOARD_CHANNEL);
-  const leaderboard = await buildLeaderboardMessage();
-
-  const payoutRows = await getPayoutRows();
-
-  const totalPayout = payoutRows.reduce(
-    (sum, row) => sum + Number(row.payout_nkfe || 0),
-    0
-  );
-
-  await channel.send(
-    `${leaderboard}\n\n` +
-    `💰 **Total Farmer Pets NKFE Owed:** ${totalPayout} $NKFE\n\n` +
-    `Use **/fp-payouts** for the manual payout list.`
-  );
-
-  await resetWeeklyStats();
-}
-
 client.once("clientReady", async () => {
   console.log(`Farmer Pets Bot online as ${client.user.tag}`);
 
@@ -557,7 +393,7 @@ client.once("clientReady", async () => {
       "0 17 * * 0",
       async () => {
         try {
-          await postWeeklyLeaderboardAndReset();
+          await postWeeklyLeaderboardAndReset(client);
         } catch (error) {
           console.error("Failed to post weekly Farmer Pets leaderboard:", error);
         }
