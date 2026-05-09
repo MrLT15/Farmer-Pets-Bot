@@ -25,9 +25,22 @@ Copy `.env.example` into your deployment environment and set the required values
 | `LEADERBOARD_CHANNEL_ID` | Recommended | Channel for leaderboard and role-unlock announcements. Defaults to the Farmer Pets production channel. |
 | `FARMER_*_ROLE_ID` | Recommended | Role IDs used by `/fp-roles` and event pings. Defaults to Farmer Pets production roles. |
 | `HEALTH_PORT` or `PORT` | Optional | Starts a lightweight HTTP health endpoint at `/health` for web-service hosts. |
+| `ENABLE_EVENT_THREADS` | Optional | Defaults to `true`; set to `false` if the bot should skip per-event Discord thread creation. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
+
+## Discord permissions
+
+In the farm event channel, make sure the bot role has:
+
+- View Channel
+- Send Messages
+- Embed Links
+- Create Public Threads, if `ENABLE_EVENT_THREADS=true`
+- Send Messages in Threads, if `ENABLE_EVENT_THREADS=true`
+
+If Discord returns `Missing Access` or `Missing Permissions` while creating event threads or posting optional rescue announcements, the bot now logs a concise warning and keeps the command flow running. If you do not want event threads, set `ENABLE_EVENT_THREADS=false`.
 
 ## Local checks
 

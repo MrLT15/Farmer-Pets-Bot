@@ -25,7 +25,8 @@ const ENV_NAMES = [
   "FARMER_PETS_API",
   "CONTRACT_ACCOUNT",
   "HEALTH_PORT",
-  "PORT"
+  "PORT",
+  "ENABLE_EVENT_THREADS"
 ];
 
 function withConfigEnv(overrides, callback) {
@@ -66,6 +67,7 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.FARMER_PETS_API, "https://pets-api-main.herokuapp.com");
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
     assert.equal(config.HEALTH_PORT, undefined);
+    assert.equal(config.ENABLE_EVENT_THREADS, true);
   });
 });
 
@@ -83,7 +85,8 @@ test("config allows deployment environment to override channel, role, and API va
     ATOMIC_API: "https://atomic.example.test/assets",
     FARMER_PETS_API: "https://pets.example.test",
     CONTRACT_ACCOUNT: "contractacct",
-    HEALTH_PORT: "8080"
+    HEALTH_PORT: "8080",
+    ENABLE_EVENT_THREADS: "false"
   }, config => {
     assert.equal(config.FARM_CHANNEL, "farm-channel-from-env");
     assert.equal(config.LEADERBOARD_CHANNEL, "leaderboard-channel-from-env");
@@ -98,6 +101,7 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.FARMER_PETS_API, "https://pets.example.test");
     assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
     assert.equal(config.HEALTH_PORT, "8080");
+    assert.equal(config.ENABLE_EVENT_THREADS, false);
   });
 });
 

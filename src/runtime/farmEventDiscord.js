@@ -1,7 +1,10 @@
+const { logDiscordPermissionWarning } = require("../utils/discordErrors");
+
 function createFarmEventDiscordRuntime({
   client,
   farmChannelId,
   farmerVerifiedRoleId,
+  enableEventThreads = true,
   awardCommunityMilestoneReward,
   buildRescueButtonRow,
   createFarmEvent,
@@ -20,9 +23,27 @@ function createFarmEventDiscordRuntime({
   logger = console,
   setTimeoutFn = setTimeout
 }) {
+  function warnDiscordPermission(message, error) {
+    return logDiscordPermissionWarning(logger, message, error);
+  }
+
+  async function sendEmbedToEventTarget(farmEvent, embed, errorMessage) {
+    try {
+      const target = getEventAnnouncementTarget(farmEvent);
+
+      if (target?.isTextBased()) {
+        await target.send({ embeds: [embed] });
+      }
+    } catch (error) {
+      if (!warnDiscordPermission(errorMessage, error)) {
+        logger.error(errorMessage, error);
+      }
+    }
+  }
+
   async function createEventThread(message, farmEvent) {
     try {
-      if (!message?.startThread) return null;
+      if (!enableEventThreads || !message?.startThread) return null;
 
       return await message.startThread({
         name: getEventThreadName(farmEvent),
@@ -30,7 +51,9 @@ function createFarmEventDiscordRuntime({
         reason: "Farmer Pets event thread"
       });
     } catch (error) {
-      logger.error("Failed to create Farmer Pets event thread:", error);
+      if (!warnDiscordPermission("Could not create Farmer Pets event thread.", error)) {
+        logger.error("Failed to create Farmer Pets event thread:", error);
+      }
       return null;
     }
   }
@@ -67,10 +90,11 @@ function createFarmEventDiscordRuntime({
 
     markCommunityGoalAnnounced(farmEvent);
 
-    const target = getEventAnnouncementTarget(farmEvent);
-    if (!target?.isTextBased()) return;
-
-    await target.send({ embeds: [embedBuilders.buildCommunityGoalReachedEmbed(farmEvent)] });
+    await sendEmbedToEventTarget(
+      farmEvent,
+      embedBuilders.buildCommunityGoalReachedEmbed(farmEvent),
+      "Could not announce Farmer Pets community goal."
+    );
   }
 
   async function endFarmEvent(farmEvent) {
@@ -92,10 +116,11 @@ function createFarmEventDiscordRuntime({
       );
     }
 
-    const target = getEventAnnouncementTarget(farmEvent);
-    if (target?.isTextBased()) {
-      await target.send({ embeds: [embedBuilders.buildCommunityEventEndEmbed(farmEvent, rewardedCount)] });
-    }
+    await sendEmbedToEventTarget(
+      farmEvent,
+      embedBuilders.buildCommunityEventEndEmbed(farmEvent, rewardedCount),
+      "Could not announce Farmer Pets community event end."
+    );
   }
 
   async function startFarmEvent() {
@@ -126,7 +151,9 @@ function createFarmEventDiscordRuntime({
         try {
           await farmEvent.thread.send(getEventThreadIntro(farmEvent));
         } catch (error) {
-          logger.error("Failed to send Farmer Pets event thread intro:", error);
+          if (!warnDiscordPermission("Could not send Farmer Pets event thread intro.", error)) {
+            logger.error("Failed to send Farmer Pets event thread intro:", error);
+          }
         }
       }
 

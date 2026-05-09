@@ -167,6 +167,30 @@ test("handleRescue releases attempt when recording throws before completion", as
   ]);
 });
 
+test("handleRescue logs Discord permission announcement failures as concise warnings", async () => {
+  const warnings = [];
+  const { handlers, state } = createHandlers({
+    logger: {
+      warn: (...args) => warnings.push(args),
+      error: (...args) => state.calls.push(["logger.error", ...args])
+    }
+  });
+  state.farmEvent.target = {
+    isTextBased: () => true,
+    send: async () => {
+      const error = new Error("Missing Permissions");
+      error.code = 50013;
+      throw error;
+    }
+  };
+
+  await handlers.handleRescue(createInteraction());
+
+  assert.equal(state.calls.some(([name]) => name === "logger.error"), false);
+  assert.match(warnings[0][0], /Failed to announce Farmer Pets rescue result/);
+  assert.match(warnings[0][0], /Missing Permissions/);
+});
+
 test("handleFarmHelp validates state and wallet before helping", async () => {
   const blocked = createHandlers({
     getFarmHelpBlockReason: () => "This farm emergency has already ended."

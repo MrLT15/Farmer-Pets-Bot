@@ -1,3 +1,5 @@
+const { logDiscordPermissionWarning } = require("../utils/discordErrors");
+
 function createRescueHandlers({
   announceCommunityGoalReached,
   embedBuilders,
@@ -159,7 +161,9 @@ function createRescueHandlers({
         await target.send({ embeds: [embed] });
       }
     } catch (error) {
-      logger.error(errorMessage, error);
+      if (!logDiscordPermissionWarning(logger, errorMessage, error)) {
+        logger.error(errorMessage, error);
+      }
     }
   }
 

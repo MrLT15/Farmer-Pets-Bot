@@ -103,6 +103,7 @@ function createBotApp({
     client,
     farmChannelId: config.FARM_CHANNEL,
     farmerVerifiedRoleId: config.FARMER_VERIFIED_ROLE,
+    enableEventThreads: config.ENABLE_EVENT_THREADS,
     awardCommunityMilestoneReward: db.awardCommunityMilestoneReward,
     buildRescueButtonRow: ui.buildRescueButtonRow,
     createFarmEvent: eventService.createFarmEvent,

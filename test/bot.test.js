@@ -65,6 +65,7 @@ function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {
       GUILD_ID: "guild-id",
       DATABASE_URL: "postgres://user:password@host/db",
       HEALTH_PORT: "8080",
+      ENABLE_EVENT_THREADS: true,
       FARM_CHANNEL: "farm-channel",
       LEADERBOARD_CHANNEL: "leaderboard-channel",
       FARMER_VERIFIED_ROLE: "verified-role",
@@ -203,6 +204,7 @@ test("createBotApp wires runtime dependencies and logs in with configured token"
   assert.deepEqual(captures.readyHandlerOptions.commands, [{ name: "fp-test" }]);
   assert.equal(captures.farmEventOptions.farmChannelId, "farm-channel");
   assert.equal(captures.farmEventOptions.farmerVerifiedRoleId, "verified-role");
+  assert.equal(captures.farmEventOptions.enableEventThreads, true);
   assert.equal(captures.healthServerOptions.getActiveFarmEvent(), null);
   assert.equal(captures.rescueHandlerOptions.flagsEphemeral, 64);
   assert.equal(captures.commandHandlerOptions.flagsEphemeral, 64);

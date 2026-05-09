@@ -2,11 +2,20 @@ function env(name, fallback) {
   return process.env[name] || fallback;
 }
 
+function envFlag(name, fallback = true) {
+  const value = process.env[name];
+
+  if (value === undefined || value === "") return fallback;
+
+  return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
+
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
 const HEALTH_PORT = process.env.HEALTH_PORT || process.env.PORT;
+const ENABLE_EVENT_THREADS = envFlag("ENABLE_EVENT_THREADS", true);
 
 const FARM_CHANNEL = env("FARM_CHANNEL", env("FARM_CHANNEL_ID", "1270948980615938109"));
 const LEADERBOARD_CHANNEL = env(
@@ -69,6 +78,7 @@ module.exports = {
   GUILD_ID,
   DATABASE_URL,
   HEALTH_PORT,
+  ENABLE_EVENT_THREADS,
   FARM_CHANNEL,
   LEADERBOARD_CHANNEL,
   FARMER_VERIFIED_ROLE,

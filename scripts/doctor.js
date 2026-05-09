@@ -95,6 +95,7 @@ async function runDoctor({
   logger.log(`ℹ️ Farm channel: ${runtimeConfig.FARM_CHANNEL || "not configured"}`);
   logger.log(`ℹ️ Leaderboard channel: ${runtimeConfig.LEADERBOARD_CHANNEL || "not configured"}`);
   logger.log(`ℹ️ Verified role: ${runtimeConfig.FARMER_VERIFIED_ROLE || "not configured"}`);
+  logger.log(`ℹ️ Event threads: ${runtimeConfig.ENABLE_EVENT_THREADS === false ? "disabled" : "enabled"}`);
 
   if (skipDatabase) {
     logger.log("⚠️ Database checks skipped by --skip-db.");
