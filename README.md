@@ -34,9 +34,20 @@ Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_
 npm install
 npm run check
 npm test
+npm run doctor -- --skip-db
 ```
 
-`npm run check` syntax-checks all JavaScript files. `npm test` runs the syntax check and the Node.js test suite.
+`npm run check` syntax-checks all JavaScript files. `npm test` runs the syntax check and the Node.js test suite. `npm run doctor -- --skip-db` validates local configuration without opening a database connection.
+
+## Deployment diagnostics
+
+Run the doctor command after setting environment variables to validate runtime configuration and the `public.verified_wallets` database dependency:
+
+```bash
+npm run doctor
+```
+
+Use `npm run doctor -- --skip-db` when you only want to validate environment variables and configured Discord IDs.
 
 ## Starting the bot
 
