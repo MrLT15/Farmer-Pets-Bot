@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createCommandHandlers } = require("../src/commands/handlers");
+const { buildEventStatusMessage, createCommandHandlers, formatDuration } = require("../src/commands/handlers");
 
 const FLAGS_EPHEMERAL = 64;
 
@@ -51,16 +51,25 @@ function createHandlers(overrides = {}) {
     }),
     buildLeaderboardMessage: async () => "leaderboard",
     buildStatsPayload: async () => ({ content: "stats" }),
+    cancelActiveFarmEvent: async () => true,
+    config: {
+      FARM_CHANNEL: "farm-channel",
+      HEALTH_PORT: "8080",
+      LEADERBOARD_CHANNEL: "leaderboard-channel"
+    },
     flagsEphemeral: FLAGS_EPHEMERAL,
     getAssets: async () => ({ walletAssets: [], stakedAssets: [], combinedAssets: [] }),
     getPayoutRows: async () => [],
     getWallet: async () => "wallet.wam",
     getActiveFarmEvent: () => null,
+    getRemainingEventMs: () => 125000,
     handleDailyCheckIn: async interaction => interaction.reply({ content: "daily" }),
     handleRescue: async interaction => interaction.reply({ content: "rescue" }),
+    postWeeklyLeaderboardAndReset: async () => {},
     resetPayouts: async () => {},
     startFarmEvent: async () => true,
     syncRoles: async () => ({ added: [], removed: [] }),
+    uptime: () => 3661,
     ...overrides
   });
 }
@@ -236,4 +245,101 @@ test("fp-testevent blocks active events and starts when idle", async () => {
 
   assert.equal(startCalls, 1);
   assert.equal(idleInteraction.editReplyPayloads.at(-1), "Test Farmer Pets event started.");
+});
+
+
+test("fp-eventstatus reports missing and active event details", async () => {
+  const missingHandlers = createHandlers();
+  const missingInteraction = createMockInteraction();
+
+  await missingHandlers["fp-eventstatus"](missingInteraction);
+
+  assert.deepEqual(missingInteraction.replyPayloads.at(-1), {
+    content: "No active Farmer Pets event.",
+    flags: FLAGS_EPHEMERAL
+  });
+
+  const activeEvent = {
+    name: "🤝 Co-op Pest Swarm",
+    isCommunity: true,
+    players: new Set(["a", "b"]),
+    helpers: new Set(["c"]),
+    communitySuccesses: 2,
+    communityGoal: 5,
+    communityBonus: 4,
+    goalAnnounced: false,
+    milestoneAwarded: false
+  };
+  const activeHandlers = createHandlers({ getActiveFarmEvent: () => activeEvent });
+  const activeInteraction = createMockInteraction();
+
+  await activeHandlers["fp-eventstatus"](activeInteraction);
+
+  const payload = activeInteraction.replyPayloads.at(-1);
+  assert.equal(payload.flags, FLAGS_EPHEMERAL);
+  assert.match(payload.content, /Co-op Pest Swarm/);
+  assert.match(payload.content, /Players: \*\*2\*\*/);
+  assert.match(payload.content, /Community progress: \*\*2\/5\*\*/);
+});
+
+test("fp-cancelevent validates and cancels active events", async () => {
+  const missingHandlers = createHandlers();
+  const missingInteraction = createMockInteraction();
+
+  await missingHandlers["fp-cancelevent"](missingInteraction);
+
+  assert.deepEqual(missingInteraction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(missingInteraction.editReplyPayloads.at(-1), "No active Farmer Pets event to cancel.");
+
+  const activeEvent = { name: "Pest Swarm" };
+  const calls = [];
+  const activeHandlers = createHandlers({
+    cancelActiveFarmEvent: async event => calls.push(["cancel", event.name]),
+    getActiveFarmEvent: () => activeEvent
+  });
+  const activeInteraction = createMockInteraction();
+
+  await activeHandlers["fp-cancelevent"](activeInteraction);
+
+  assert.deepEqual(calls, [["cancel", "Pest Swarm"]]);
+  assert.equal(activeInteraction.editReplyPayloads.at(-1), "Cancelled Farmer Pets event: **Pest Swarm**.");
+});
+
+test("fp-postleaderboard posts and resets weekly stats", async () => {
+  let postCalled = false;
+  const handlers = createHandlers({
+    postWeeklyLeaderboardAndReset: async () => {
+      postCalled = true;
+    }
+  });
+  const interaction = createMockInteraction();
+
+  await handlers["fp-postleaderboard"](interaction);
+
+  assert.equal(postCalled, true);
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(
+    interaction.editReplyPayloads.at(-1),
+    "Weekly Farmer Pets leaderboard posted and weekly stats reset."
+  );
+});
+
+test("fp-health reports runtime configuration and active event", async () => {
+  const handlers = createHandlers({ getActiveFarmEvent: () => ({ name: "Pest Swarm" }) });
+  const interaction = createMockInteraction();
+
+  await handlers["fp-health"](interaction);
+
+  const payload = interaction.replyPayloads.at(-1);
+  assert.equal(payload.flags, FLAGS_EPHEMERAL);
+  assert.match(payload.content, /Uptime: \*\*1h 1m 1s\*\*/);
+  assert.match(payload.content, /Active event: \*\*Pest Swarm\*\*/);
+  assert.match(payload.content, /Health port: \*\*8080\*\*/);
+});
+
+test("command helper formatting is stable", () => {
+  assert.equal(formatDuration(0), "0s");
+  assert.equal(formatDuration(61000), "1m 1s");
+  assert.equal(formatDuration(3661000), "1h 1m 1s");
+  assert.match(buildEventStatusMessage({ name: "Pest", players: new Set(), helpers: new Set() }, 1000), /Event: \*\*Pest\*\*/);
 });

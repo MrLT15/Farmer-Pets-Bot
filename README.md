@@ -40,6 +40,26 @@ npm run doctor -- --skip-db
 
 `npm run check` syntax-checks all JavaScript files. `npm test` runs the syntax check and the Node.js test suite. `npm run doctor -- --skip-db` validates local configuration without opening a database connection.
 
+## Command reference
+
+General commands:
+
+- `/fp-roles` — sync Farmer Pets Discord roles from verified wallet assets.
+- `/fp-rescue` — join the current rescue event.
+- `/fp-stats` — show your Farmer Pets stats.
+- `/fp-daily` — claim the daily check-in reward.
+- `/fp-leaderboard` — show the weekly leaderboard.
+
+Admin-only operational commands:
+
+- `/fp-health` — show bot uptime, configured channels, health-port status, and active event name.
+- `/fp-eventstatus` — show active event timers, players, helpers, and co-op progress.
+- `/fp-cancelevent` — cancel and close the active event.
+- `/fp-postleaderboard` — manually post the weekly leaderboard and reset weekly stats.
+- `/fp-payouts` — show outstanding manual $NKFE payouts.
+- `/fp-resetpayouts` — reset payout balances after manual payment.
+- `/fp-testevent` — start a test event when no event is active.
+
 ## Health endpoint
 
 Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP server. `GET /health` returns uptime and active farm-event summary data, which is useful for deployment health checks.

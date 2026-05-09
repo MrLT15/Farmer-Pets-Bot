@@ -3,16 +3,21 @@ function createCommandHandlers({
   analyzeAssets,
   buildLeaderboardMessage,
   buildStatsPayload,
+  cancelActiveFarmEvent,
+  config = {},
   flagsEphemeral,
   getAssets,
   getPayoutRows,
   getWallet,
   getActiveFarmEvent,
+  getRemainingEventMs = farmEvent => Math.max((farmEvent?.expires || Date.now()) - Date.now(), 0),
   handleDailyCheckIn,
   handleRescue,
+  postWeeklyLeaderboardAndReset,
   resetPayouts,
   startFarmEvent,
-  syncRoles
+  syncRoles,
+  uptime = () => process.uptime()
 }) {
   return {
     "fp-rescue": handleRescue,
@@ -44,6 +49,26 @@ function createCommandHandlers({
       flagsEphemeral,
       getActiveFarmEvent,
       startFarmEvent
+    }),
+    "fp-eventstatus": interaction => handleEventStatusCommand(interaction, {
+      flagsEphemeral,
+      getActiveFarmEvent,
+      getRemainingEventMs
+    }),
+    "fp-cancelevent": interaction => handleCancelEventCommand(interaction, {
+      cancelActiveFarmEvent,
+      flagsEphemeral,
+      getActiveFarmEvent
+    }),
+    "fp-postleaderboard": interaction => handlePostLeaderboardCommand(interaction, {
+      flagsEphemeral,
+      postWeeklyLeaderboardAndReset
+    }),
+    "fp-health": interaction => handleHealthCommand(interaction, {
+      config,
+      flagsEphemeral,
+      getActiveFarmEvent,
+      uptime
     })
   };
 }
@@ -173,4 +198,111 @@ async function handleTestEventCommand(interaction, {
   );
 }
 
-module.exports = { createCommandHandlers };
+async function handleEventStatusCommand(interaction, {
+  flagsEphemeral,
+  getActiveFarmEvent,
+  getRemainingEventMs
+}) {
+  const farmEvent = getActiveFarmEvent();
+
+  if (!farmEvent) {
+    await interaction.reply({
+      content: "No active Farmer Pets event.",
+      flags: flagsEphemeral
+    });
+    return;
+  }
+
+  await interaction.reply({
+    content: buildEventStatusMessage(farmEvent, getRemainingEventMs(farmEvent)),
+    flags: flagsEphemeral
+  });
+}
+
+async function handleCancelEventCommand(interaction, {
+  cancelActiveFarmEvent,
+  flagsEphemeral,
+  getActiveFarmEvent
+}) {
+  await interaction.deferReply({ flags: flagsEphemeral });
+
+  const farmEvent = getActiveFarmEvent();
+
+  if (!farmEvent) {
+    await interaction.editReply("No active Farmer Pets event to cancel.");
+    return;
+  }
+
+  await cancelActiveFarmEvent(farmEvent);
+  await interaction.editReply(`Cancelled Farmer Pets event: **${farmEvent.name}**.`);
+}
+
+async function handlePostLeaderboardCommand(interaction, {
+  flagsEphemeral,
+  postWeeklyLeaderboardAndReset
+}) {
+  await interaction.deferReply({ flags: flagsEphemeral });
+  await postWeeklyLeaderboardAndReset();
+  await interaction.editReply("Weekly Farmer Pets leaderboard posted and weekly stats reset.");
+}
+
+async function handleHealthCommand(interaction, {
+  config,
+  flagsEphemeral,
+  getActiveFarmEvent,
+  uptime
+}) {
+  const farmEvent = getActiveFarmEvent();
+  const lines = [
+    "🩺 **Farmer Pets Bot Health**",
+    "",
+    `Uptime: **${formatDuration(Math.round(uptime() * 1000))}**`,
+    `Active event: **${farmEvent ? farmEvent.name : "None"}**`,
+    `Farm channel: **${config.FARM_CHANNEL || "Not configured"}**`,
+    `Leaderboard channel: **${config.LEADERBOARD_CHANNEL || "Not configured"}**`,
+    `Health port: **${config.HEALTH_PORT || "Disabled"}**`
+  ];
+
+  await interaction.reply({
+    content: lines.join("\n"),
+    flags: flagsEphemeral
+  });
+}
+
+function buildEventStatusMessage(farmEvent, remainingMs) {
+  const lines = [
+    `🌾 **Farmer Pets Event Status**`,
+    `Event: **${farmEvent.name}**`,
+    `Time remaining: **${formatDuration(remainingMs)}**`,
+    `Players: **${farmEvent.players?.size || 0}**`,
+    `Helpers: **${farmEvent.helpers?.size || 0}**`
+  ];
+
+  if (farmEvent.isCommunity) {
+    lines.push(
+      `Community progress: **${farmEvent.communitySuccesses}/${farmEvent.communityGoal}**`,
+      `Community bonus: **${farmEvent.communityBonus} $NKFE**`,
+      `Goal announced: **${farmEvent.goalAnnounced ? "Yes" : "No"}**`,
+      `Milestone awarded: **${farmEvent.milestoneAwarded ? "Yes" : "No"}**`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(Math.ceil(ms / 1000), 0);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+module.exports = {
+  buildEventStatusMessage,
+  createCommandHandlers,
+  formatDuration
+};

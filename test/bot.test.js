@@ -139,6 +139,7 @@ function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {
         captures.farmEventOptions = options;
         return {
           announceCommunityGoalReached: async () => calls.push("announceGoal"),
+          endFarmEvent: async farmEvent => calls.push(["endEvent", farmEvent.name]),
           scheduleEvent: () => calls.push("scheduleEvent"),
           startFarmEvent: async () => true,
           updateFarmEventMessage: async () => calls.push("updateEvent")
@@ -211,6 +212,23 @@ test("createBotApp wires runtime dependencies and logs in with configured token"
     ["on", "interactionCreate"]
   ]);
   assert.deepEqual(Object.keys(processLike.handlers).sort(), ["SIGINT", "SIGTERM"]);
+});
+
+
+
+test("cancelActiveFarmEvent ends active events, clears timers, and schedules the next event", async () => {
+  const { app, calls, captures } = createBotAppFixture();
+  const timeout = setTimeout(() => {}, 1000);
+  const farmEvent = { name: "Pest Swarm", timeout };
+
+  captures.farmEventOptions.setActiveFarmEvent(farmEvent);
+
+  assert.equal(app.getActiveFarmEvent(), farmEvent);
+  assert.equal(await app.cancelActiveFarmEvent(), true);
+  assert.equal(farmEvent.timeout, null);
+  assert.deepEqual(calls, [["endEvent", "Pest Swarm"], "scheduleEvent"]);
+
+  assert.equal(await app.cancelActiveFarmEvent(null), false);
 });
 
 test("announceNewFarmerRoles sends role unlock messages to the configured leaderboard channel", async () => {

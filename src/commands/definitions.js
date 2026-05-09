@@ -34,6 +34,26 @@ const commands = [
   new SlashCommandBuilder()
     .setName("fp-testevent")
     .setDescription("Admin: manually start a Farmer Pets event")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("fp-eventstatus")
+    .setDescription("Admin: show the active Farmer Pets event status")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("fp-cancelevent")
+    .setDescription("Admin: cancel the active Farmer Pets event")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("fp-postleaderboard")
+    .setDescription("Admin: post the weekly leaderboard and reset weekly stats")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("fp-health")
+    .setDescription("Admin: show Farmer Pets bot runtime health")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 

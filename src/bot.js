@@ -149,6 +149,20 @@ function createBotApp({
     updateFarmEventMessage
   });
 
+
+  async function cancelActiveFarmEvent(farmEvent = activeFarmEvent) {
+    if (!farmEvent) return false;
+
+    if (farmEvent.timeout) {
+      clearTimeout(farmEvent.timeout);
+      farmEvent.timeout = null;
+    }
+
+    await farmEventDiscord.endFarmEvent(farmEvent);
+    scheduleEvent();
+    return true;
+  }
+
   function registerBotReadyHandler() {
     runtimes.registerClientReadyHandler({
       client,
@@ -168,16 +182,21 @@ function createBotApp({
       analyzeAssets: roleService.analyzeAssets,
       buildLeaderboardMessage: playerStatsService.buildLeaderboardMessage,
       buildStatsPayload: playerStatsService.buildStatsPayload,
+      cancelActiveFarmEvent,
+      config,
       flagsEphemeral: config.FLAGS_EPHEMERAL,
       getAssets: assetService.getAssets,
       getPayoutRows: db.getPayoutRows,
       getWallet: db.getWallet,
       getActiveFarmEvent: () => activeFarmEvent,
+      getRemainingEventMs: eventService.getRemainingEventMs,
       handleDailyCheckIn: playerStatsService.handleDailyCheckIn,
       handleRescue,
+      postWeeklyLeaderboardAndReset: () => playerStatsService.postWeeklyLeaderboardAndReset(client),
       resetPayouts: db.resetPayouts,
       startFarmEvent,
-      syncRoles: roleService.syncRoles
+      syncRoles: roleService.syncRoles,
+      uptime: processLike.uptime ? () => processLike.uptime() : undefined
     });
 
     client.on("interactionCreate", runtimes.createInteractionHandler({
@@ -241,6 +260,7 @@ function createBotApp({
 
   return {
     announceNewFarmerRoles,
+    cancelActiveFarmEvent,
     client,
     getActiveFarmEvent: () => activeFarmEvent,
     registerBotReadyHandler,
