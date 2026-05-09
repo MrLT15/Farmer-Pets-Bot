@@ -25,6 +25,7 @@ const { createCommandHandlers } = require("./commands/handlers");
 const { createInteractionHandler } = require("./interactions");
 const { createFarmEventDiscordRuntime } = require("./runtime/farmEventDiscord");
 const { registerClientReadyHandler } = require("./runtime/startup");
+const { createRescueHandlers } = require("./runtime/rescueHandlers");
 const {
   createFarmEvent,
   getEventThreadIntro,
@@ -108,154 +109,25 @@ const {
   updateFarmEventMessage
 } = farmEventDiscord;
 
-async function handleRescue(interaction) {
-  const farmEvent = activeFarmEvent;
-
-  const rescueBlockReason = getRescueBlockReason(farmEvent, interaction.user.id);
-
-  if (rescueBlockReason) {
-    await interaction.reply({
-      content: rescueBlockReason,
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  reserveRescueAttempt(farmEvent, interaction.user.id);
-
-  let attemptRecorded = false;
-
-  try {
-    const wallet = await getWallet(interaction.user.id);
-
-    if (!wallet) {
-      releaseRescueAttempt(farmEvent, interaction.user.id);
-
-      await interaction.reply({
-        content: "You must verify your wallet first using `/verify`.",
-        flags: FLAGS_EPHEMERAL
-      });
-      return;
-    }
-
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-
-    await ensurePlayer(interaction.user.id, wallet);
-
-    const successChance = getSuccessChance(member);
-    const success = Math.random() < successChance;
-    const reward = getRescueReward(farmEvent, success);
-
-    const streak = await recordRescue(
-      interaction.user.id,
-      wallet,
-      farmEvent.name,
-      success,
-      reward
-    );
-
-    if (success && recordCommunitySuccess(farmEvent)) {
-      await updateFarmEventMessage(farmEvent);
-      await announceCommunityGoalReached(farmEvent);
-    }
-
-    attemptRecorded = true;
-
-    const resultEmbed = embedBuilders.buildRescueResultEmbed({
-      member,
-      farmEvent,
-      success,
-      reward,
-      successChance,
-      streak
-    });
-
-    await interaction.reply({
-      embeds: [resultEmbed],
-      flags: FLAGS_EPHEMERAL
-    });
-
-    try {
-      const target = getEventAnnouncementTarget(farmEvent);
-
-      if (target?.isTextBased()) {
-        await target.send({ embeds: [resultEmbed] });
-      }
-    } catch (error) {
-      console.error("Failed to announce Farmer Pets rescue result:", error);
-    }
-  } catch (error) {
-    if (!attemptRecorded) {
-      releaseRescueAttempt(farmEvent, interaction.user.id);
-    }
-
-    throw error;
-  }
-}
-
-
-async function handleFarmHelp(interaction) {
-  const farmEvent = activeFarmEvent;
-
-  const helpBlockReason = getFarmHelpBlockReason(farmEvent, interaction.user.id);
-
-  if (helpBlockReason) {
-    await interaction.reply({
-      content: helpBlockReason,
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const farmHelpWallet = await getWallet(interaction.user.id);
-
-  if (!farmHelpWallet) {
-    await interaction.reply({
-      content: "You must verify your wallet first using `/verify`.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  if (!farmEvent.players.has(interaction.user.id)) {
-    await interaction.reply({
-      content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const farmHelpMember = await interaction.guild.members.fetch(interaction.user.id);
-  await ensurePlayer(interaction.user.id, farmHelpWallet);
-
-  const progressAdded = recordFarmHelp(farmEvent, interaction.user.id);
-
-  if (farmEvent.isCommunity) {
-    await updateFarmEventMessage(farmEvent);
-    await announceCommunityGoalReached(farmEvent);
-  }
-
-  const helpEmbed = embedBuilders.buildFarmHelpEmbed({
-    member: farmHelpMember,
-    farmEvent,
-    progressAdded
-  });
-
-  await interaction.reply({
-    embeds: [helpEmbed],
-    flags: FLAGS_EPHEMERAL
-  });
-
-  try {
-    const target = getEventAnnouncementTarget(farmEvent);
-
-    if (target?.isTextBased()) {
-      await target.send({ embeds: [helpEmbed] });
-    }
-  } catch (error) {
-    console.error("Failed to announce Farmer Pets farmhand help:", error);
-  }
-}
+const { handleFarmHelp, handleRescue } = createRescueHandlers({
+  announceCommunityGoalReached,
+  embedBuilders,
+  ensurePlayer,
+  flagsEphemeral: FLAGS_EPHEMERAL,
+  getActiveFarmEvent: () => activeFarmEvent,
+  getEventAnnouncementTarget,
+  getFarmHelpBlockReason,
+  getRescueBlockReason,
+  getRescueReward,
+  getSuccessChance,
+  getWallet,
+  recordCommunitySuccess,
+  recordFarmHelp,
+  recordRescue,
+  releaseRescueAttempt,
+  reserveRescueAttempt,
+  updateFarmEventMessage
+});
 
 function registerBotReadyHandler() {
   registerClientReadyHandler({
