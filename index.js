@@ -21,17 +21,9 @@ const {
   LEADERBOARD_CHANNEL,
   FARMER_VERIFIED_ROLE,
   FLAGS_EPHEMERAL,
-  FARM_EVENT_DURATION_MS,
   RESCUE_BUTTON_CUSTOM_ID,
-  HELP_FARM_BUTTON_CUSTOM_ID,
-  COMMUNITY_EVENT_CHANCE,
-  COMMUNITY_GOAL_MIN,
-  COMMUNITY_GOAL_MAX,
-  COMMUNITY_BONUS_MIN,
-  COMMUNITY_BONUS_MAX,
-  COMMUNITY_HELPS_PER_PROGRESS
+  HELP_FARM_BUTTON_CUSTOM_ID
 } = require("./src/config");
-const { randomInt } = require("./src/utils/random");
 const { getPacificDateKey, getYesterdayPacificDateKey } = require("./src/utils/dates");
 const { calculateDailyReward } = require("./src/utils/rewards");
 const { getEventAnnouncementTarget } = require("./src/utils/events");
@@ -39,6 +31,24 @@ const { buildRescueButtonRow } = require("./src/ui/buttons");
 const embedBuilders = require("./src/ui/embeds");
 const { getAssets } = require("./src/services/assets");
 const { analyzeAssets, getSuccessChance, syncRoles } = require("./src/services/roles");
+const {
+  createFarmEvent,
+  getEventThreadIntro,
+  getEventThreadName,
+  getFarmHelpBlockReason,
+  getNextFarmEventDelay,
+  getRemainingEventMs,
+  getRescueBlockReason,
+  getRescueReward,
+  markCommunityGoalAnnounced,
+  markCommunityMilestoneAwarded,
+  recordCommunitySuccess,
+  recordFarmHelp,
+  releaseRescueAttempt,
+  reserveRescueAttempt,
+  shouldAnnounceCommunityGoal,
+  shouldAwardCommunityMilestone
+} = require("./src/services/farmEvents");
 const {
   awardCommunityMilestoneReward,
   ensurePlayer,
@@ -84,9 +94,7 @@ async function createEventThread(message, farmEvent) {
     if (!message?.startThread) return null;
 
     return await message.startThread({
-      name: farmEvent.isCommunity
-        ? `🤝 ${farmEvent.name}`
-        : `🌾 ${farmEvent.name}`,
+      name: getEventThreadName(farmEvent),
       autoArchiveDuration: 60,
       reason: "Farmer Pets event thread"
     });
@@ -124,10 +132,9 @@ async function closeFarmEventMessage(farmEvent) {
 }
 
 async function announceCommunityGoalReached(farmEvent) {
-  if (!farmEvent.isCommunity || farmEvent.goalAnnounced) return;
-  if (farmEvent.communitySuccesses < farmEvent.communityGoal) return;
+  if (!shouldAnnounceCommunityGoal(farmEvent)) return;
 
-  farmEvent.goalAnnounced = true;
+  markCommunityGoalAnnounced(farmEvent);
 
   const target = getEventAnnouncementTarget(farmEvent);
   if (!target?.isTextBased()) return;
@@ -146,8 +153,8 @@ async function endFarmEvent(farmEvent) {
 
   let rewardedCount = 0;
 
-  if (farmEvent.communitySuccesses >= farmEvent.communityGoal && !farmEvent.milestoneAwarded) {
-    farmEvent.milestoneAwarded = true;
+  if (shouldAwardCommunityMilestone(farmEvent)) {
+    markCommunityMilestoneAwarded(farmEvent);
     rewardedCount = await awardCommunityMilestoneReward(
       [...farmEvent.players],
       farmEvent.communityBonus
@@ -163,49 +170,7 @@ async function endFarmEvent(farmEvent) {
 async function startFarmEvent() {
   if (activeFarmEvent) return false;
 
-  const roll = randomInt(1, 100);
-
-  let name = "🐛 Pest Swarm";
-  let min = 1;
-  let max = 5;
-
-  if (roll <= 5) {
-    name = "🌾 Legendary Harvest Crisis";
-    min = 10;
-    max = 25;
-  } else if (roll <= 25) {
-    name = "⚠️ Rare Infestation";
-    min = 5;
-    max = 10;
-  }
-
-  const isCommunity = randomInt(1, 100) <= COMMUNITY_EVENT_CHANCE;
-
-  if (isCommunity) {
-    name = `🤝 Co-op ${name.replace(/^\S+\s*/, "")}`;
-    min += 1;
-    max += 2;
-  }
-
-  const farmEvent = {
-    name,
-    rewardMin: min,
-    rewardMax: max,
-    expires: Date.now() + FARM_EVENT_DURATION_MS,
-    players: new Set(),
-    helpers: new Set(),
-    timeout: null,
-    channel: null,
-    message: null,
-    thread: null,
-    isCommunity,
-    communityGoal: isCommunity ? randomInt(COMMUNITY_GOAL_MIN, COMMUNITY_GOAL_MAX) : 0,
-    communitySuccesses: 0,
-    communityHelps: 0,
-    communityBonus: isCommunity ? randomInt(COMMUNITY_BONUS_MIN, COMMUNITY_BONUS_MAX) : 0,
-    goalAnnounced: false,
-    milestoneAwarded: false
-  };
+  const farmEvent = createFarmEvent();
 
   activeFarmEvent = farmEvent;
 
@@ -228,11 +193,7 @@ async function startFarmEvent() {
 
     if (farmEvent.thread?.isTextBased()) {
       try {
-        await farmEvent.thread.send(
-          farmEvent.isCommunity
-            ? "🤝 Use this thread to coordinate the co-op rescue and cheer farmers on!"
-            : "🌾 Rescue discussion thread is open for this farm event."
-        );
+        await farmEvent.thread.send(getEventThreadIntro(farmEvent));
       } catch (error) {
         console.error("Failed to send Farmer Pets event thread intro:", error);
       }
@@ -242,7 +203,7 @@ async function startFarmEvent() {
       endFarmEvent(farmEvent)
         .catch(error => console.error("Failed to end Farmer Pets event:", error))
         .finally(() => scheduleEvent());
-    }, FARM_EVENT_DURATION_MS);
+    }, getRemainingEventMs(farmEvent));
 
     return true;
   } catch (error) {
@@ -255,10 +216,7 @@ async function startFarmEvent() {
 }
 
 function scheduleEvent() {
-  const delay = randomInt(
-    2 * 60 * 60 * 1000,
-    4 * 60 * 60 * 1000
-  );
+  const delay = getNextFarmEventDelay();
 
   console.log(`Next Farmer Pets event in ${Math.round(delay / 60000)} minutes.`);
 
@@ -273,31 +231,156 @@ function scheduleEvent() {
 async function handleRescue(interaction) {
   const farmEvent = activeFarmEvent;
 
-  if (!farmEvent) {
+  const rescueBlockReason = getRescueBlockReason(farmEvent, interaction.user.id);
+
+  if (rescueBlockReason) {
     await interaction.reply({
-      content: "No active farm emergency.",
+      content: rescueBlockReason,
       flags: FLAGS_EPHEMERAL
     });
     return;
   }
 
-  if (Date.now() > farmEvent.expires) {
+  reserveRescueAttempt(farmEvent, interaction.user.id);
+
+  let attemptRecorded = false;
+
+  try {
+    const wallet = await getWallet(interaction.user.id);
+
+    if (!wallet) {
+      releaseRescueAttempt(farmEvent, interaction.user.id);
+
+      await interaction.reply({
+        content: "You must verify your wallet first using `/verify`.",
+        flags: FLAGS_EPHEMERAL
+      });
+      return;
+    }
+
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    await ensurePlayer(interaction.user.id, wallet);
+
+    const successChance = getSuccessChance(member);
+    const success = Math.random() < successChance;
+    const reward = getRescueReward(farmEvent, success);
+
+    const streak = await recordRescue(
+      interaction.user.id,
+      wallet,
+      farmEvent.name,
+      success,
+      reward
+    );
+
+    if (success && recordCommunitySuccess(farmEvent)) {
+      await updateFarmEventMessage(farmEvent);
+      await announceCommunityGoalReached(farmEvent);
+    }
+
+    attemptRecorded = true;
+
+    const resultEmbed = embedBuilders.buildRescueResultEmbed({
+      member,
+      farmEvent,
+      success,
+      reward,
+      successChance,
+      streak
+    });
+
     await interaction.reply({
-      content: "This farm emergency has already ended.",
+      embeds: [resultEmbed],
+      flags: FLAGS_EPHEMERAL
+    });
+
+    try {
+      const target = getEventAnnouncementTarget(farmEvent);
+
+      if (target?.isTextBased()) {
+        await target.send({ embeds: [resultEmbed] });
+      }
+    } catch (error) {
+      console.error("Failed to announce Farmer Pets rescue result:", error);
+    }
+  } catch (error) {
+    if (!attemptRecorded) {
+      releaseRescueAttempt(farmEvent, interaction.user.id);
+    }
+
+    throw error;
+  }
+}
+
+
+async function handleFarmHelp(interaction) {
+  const farmEvent = activeFarmEvent;
+
+  const helpBlockReason = getFarmHelpBlockReason(farmEvent, interaction.user.id);
+
+  if (helpBlockReason) {
+    await interaction.reply({
+      content: helpBlockReason,
       flags: FLAGS_EPHEMERAL
     });
     return;
   }
 
-  if (farmEvent.players.has(interaction.user.id)) {
+  const farmHelpWallet = await getWallet(interaction.user.id);
+
+  if (!farmHelpWallet) {
     await interaction.reply({
-      content: "You already attempted this rescue.",
+      content: "You must verify your wallet first using `/verify`.",
       flags: FLAGS_EPHEMERAL
     });
     return;
   }
 
-  farmEvent.players.add(interaction.user.id);
+  if (!farmEvent.players.has(interaction.user.id)) {
+    await interaction.reply({
+      content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
+
+  const farmHelpMember = await interaction.guild.members.fetch(interaction.user.id);
+  await ensurePlayer(interaction.user.id, farmHelpWallet);
+
+  const progressAdded = recordFarmHelp(farmEvent, interaction.user.id);
+
+  if (farmEvent.isCommunity) {
+    await updateFarmEventMessage(farmEvent);
+    await announceCommunityGoalReached(farmEvent);
+  }
+
+  const helpEmbed = embedBuilders.buildFarmHelpEmbed({
+    member: farmHelpMember,
+    farmEvent,
+    progressAdded
+  });
+
+  await interaction.reply({
+    embeds: [helpEmbed],
+    flags: FLAGS_EPHEMERAL
+  });
+
+  try {
+    const target = getEventAnnouncementTarget(farmEvent);
+
+    if (target?.isTextBased()) {
+      await target.send({ embeds: [helpEmbed] });
+    }
+  } catch (error) {
+    console.error("Failed to announce Farmer Pets farmhand help:", error);
+  }
+}
+
+// STATS / LEADERBOARD
+
+async function handleDailyCheckIn(interaction) {
+  const wallet = await getWallet(interaction.user.id);
 
   let attemptRecorded = false;
 
@@ -378,97 +461,6 @@ async function handleFarmHelp(interaction) {
 
   if (!farmEvent) {
     await interaction.reply({
-      content: "No active farm emergency.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  if (Date.now() > farmEvent.expires) {
-    await interaction.reply({
-      content: "This farm emergency has already ended.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  if (farmEvent.helpers.has(interaction.user.id)) {
-    await interaction.reply({
-      content: "You already helped the farm during this event.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const farmHelpWallet = await getWallet(interaction.user.id);
-
-  if (!farmHelpWallet) {
-    await interaction.reply({
-      content: "No active farm emergency.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  if (!farmEvent.players.has(interaction.user.id)) {
-    await interaction.reply({
-      content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
-      flags: FLAGS_EPHEMERAL
-    });
-    return;
-  }
-
-  const farmHelpMember = await interaction.guild.members.fetch(interaction.user.id);
-  await ensurePlayer(interaction.user.id, farmHelpWallet);
-
-  farmEvent.helpers.add(interaction.user.id);
-
-  let progressAdded = false;
-
-  if (farmEvent.isCommunity) {
-    farmEvent.communityHelps++;
-
-    if (
-      farmEvent.communityHelps % COMMUNITY_HELPS_PER_PROGRESS === 0 &&
-      farmEvent.communitySuccesses < farmEvent.communityGoal
-    ) {
-      farmEvent.communitySuccesses++;
-      progressAdded = true;
-    }
-
-    await updateFarmEventMessage(farmEvent);
-    await announceCommunityGoalReached(farmEvent);
-  }
-
-  const helpEmbed = embedBuilders.buildFarmHelpEmbed({
-    member: farmHelpMember,
-    farmEvent,
-    progressAdded
-  });
-
-  await interaction.reply({
-    embeds: [helpEmbed],
-    flags: FLAGS_EPHEMERAL
-  });
-
-  try {
-    const target = getEventAnnouncementTarget(farmEvent);
-
-    if (target?.isTextBased()) {
-      await target.send({ embeds: [helpEmbed] });
-    }
-  } catch (error) {
-    console.error("Failed to announce Farmer Pets farmhand help:", error);
-  }
-}
-
-// STATS / LEADERBOARD
-
-async function handleDailyCheckIn(interaction) {
-  const wallet = await getWallet(interaction.user.id);
-
-  if (!wallet) {
-    await interaction.reply({
       content: "No verified wallet found. Please verify your wallet first using `/verify`.",
       flags: FLAGS_EPHEMERAL
     });
@@ -479,7 +471,13 @@ async function handleDailyCheckIn(interaction) {
   const todayKey = getPacificDateKey();
   const yesterdayKey = getYesterdayPacificDateKey();
 
-  await ensurePlayer(interaction.user.id, wallet);
+  if (farmEvent.helpers.has(interaction.user.id)) {
+    await interaction.reply({
+      content: "You already helped the farm during this event.",
+      flags: FLAGS_EPHEMERAL
+    });
+    return;
+  }
 
   const fpDailyCheckInState = await getDailyCheckInState(interaction.user.id);
   const fpDailyLastCheckInKey = fpDailyCheckInState.last_daily_checkin_key;
