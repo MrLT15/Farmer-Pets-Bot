@@ -8,6 +8,10 @@ function createMockPool(results = []) {
 
   return {
     calls,
+    endCalls: 0,
+    async end() {
+      this.endCalls++;
+    },
     async query(sql, params) {
       calls.push({ sql, params });
       const result = results.shift();
@@ -30,6 +34,7 @@ test("createDatabase exposes the database helper surface", () => {
 
   assert.deepEqual(Object.keys(db).sort(), [
     "awardCommunityMilestoneReward",
+    "close",
     "ensurePlayer",
     "getDailyCheckInState",
     "getPayoutRows",
@@ -43,6 +48,17 @@ test("createDatabase exposes the database helper surface", () => {
     "resetWeeklyStats",
     "validateRequiredTables"
   ].sort());
+});
+
+
+
+test("close ends the injected pool when supported", async () => {
+  const pool = createMockPool();
+  const db = createDatabase(pool);
+
+  await db.close();
+
+  assert.equal(pool.endCalls, 1);
 });
 
 test("validateRequiredTables fails when verified_wallets table is missing", async () => {

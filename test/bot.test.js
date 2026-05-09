@@ -6,6 +6,7 @@ const { createBotApp, getMissingRuntimeConfig } = require("../src/bot");
 function createFakeClient() {
   const client = {
     events: [],
+    destroyCalls: 0,
     loginCalls: [],
     sentMessages: [],
     channels: {
@@ -24,6 +25,9 @@ function createFakeClient() {
     once(eventName, handler) {
       this.events.push(["once", eventName, handler]);
     },
+    async destroy() {
+      this.destroyCalls++;
+    },
     login(token) {
       this.loginCalls.push(token);
       return Promise.resolve("logged-in");
@@ -33,10 +37,25 @@ function createFakeClient() {
   return client;
 }
 
-function createBotAppFixture({ config: configOverrides = {} } = {}) {
+function createFakeProcess() {
+  return {
+    exitCodes: [],
+    handlers: {},
+    exit(code) {
+      this.exitCodes.push(code);
+    },
+    once(signal, handler) {
+      this.handlers[signal] = handler;
+    }
+  };
+}
+
+function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {} } = {}) {
   const calls = [];
   const captures = {};
+  const logs = [];
   const client = createFakeClient();
+  const processLike = createFakeProcess();
 
   const app = createBotApp({
     client,
@@ -54,12 +73,14 @@ function createBotAppFixture({ config: configOverrides = {} } = {}) {
     commandDefinitions: [{ name: "fp-test" }],
     db: {
       awardCommunityMilestoneReward: async () => {},
+      close: async () => calls.push(["db.close"]),
       ensurePlayer: async () => {},
       getPayoutRows: async () => [],
       getWallet: async () => "wallet.wam",
       initDatabase: async () => {},
       recordRescue: async () => ({}),
-      resetPayouts: async () => {}
+      resetPayouts: async () => {},
+      ...dbOverrides
     },
     eventService: {
       createFarmEvent: () => ({}),
@@ -96,6 +117,11 @@ function createBotAppFixture({ config: configOverrides = {} } = {}) {
       embedBuilders: {}
     },
     utils: { getEventAnnouncementTarget: () => null },
+    processLike,
+    logger: {
+      error: (...args) => logs.push(["error", ...args]),
+      log: (...args) => logs.push(["log", ...args])
+    },
     runtimes: {
       createCommandHandlers: options => {
         captures.commandHandlerOptions = options;
@@ -128,7 +154,7 @@ function createBotAppFixture({ config: configOverrides = {} } = {}) {
     }
   });
 
-  return { app, calls, captures, client };
+  return { app, calls, captures, client, logs, processLike };
 }
 
 
@@ -156,7 +182,7 @@ test("startBot fails before registering handlers when deployment settings are mi
 });
 
 test("createBotApp wires runtime dependencies and logs in with configured token", async () => {
-  const { app, captures, client } = createBotAppFixture();
+  const { app, captures, client, processLike } = createBotAppFixture();
 
   const loginResult = await app.startBot();
 
@@ -174,6 +200,7 @@ test("createBotApp wires runtime dependencies and logs in with configured token"
     ["once", "clientReady"],
     ["on", "interactionCreate"]
   ]);
+  assert.deepEqual(Object.keys(processLike.handlers).sort(), ["SIGINT", "SIGTERM"]);
 });
 
 test("announceNewFarmerRoles sends role unlock messages to the configured leaderboard channel", async () => {
@@ -199,4 +226,34 @@ test("announceNewFarmerRoles skips empty role updates", async () => {
 
   assert.deepEqual(client.channels.fetchCalls, []);
   assert.deepEqual(client.sentMessages, []);
+});
+
+
+test("stop destroys the Discord client and closes the database once", async () => {
+  const { app, calls, client, logs } = createBotAppFixture();
+
+  await app.stop({ signal: "SIGTERM" });
+  await app.stop({ signal: "SIGINT" });
+
+  assert.equal(client.destroyCalls, 1);
+  assert.deepEqual(calls, [["db.close"]]);
+  assert.deepEqual(logs, [
+    ["log", "Received SIGTERM; shutting down Farmer Pets Bot."],
+    ["log", "Farmer Pets Bot shutdown complete."]
+  ]);
+});
+
+test("shutdown signal handler stops resources and exits cleanly", async () => {
+  const { app, calls, client, processLike } = createBotAppFixture();
+
+  app.registerShutdownHandlers();
+  app.registerShutdownHandlers();
+
+  assert.deepEqual(Object.keys(processLike.handlers).sort(), ["SIGINT", "SIGTERM"]);
+
+  await processLike.handlers.SIGTERM();
+
+  assert.equal(client.destroyCalls, 1);
+  assert.deepEqual(calls, [["db.close"]]);
+  assert.deepEqual(processLike.exitCodes, [0]);
 });

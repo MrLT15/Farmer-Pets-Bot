@@ -70,9 +70,13 @@ function createBotApp({
     createInteractionHandler,
     createRescueHandlers,
     registerClientReadyHandler
-  }
+  },
+  processLike = process,
+  logger = console
 } = {}) {
   let activeFarmEvent = null;
+  let stopping = false;
+  let shutdownHandlersRegistered = false;
 
   async function announceNewFarmerRoles(member, wallet, addedRoleNames) {
     if (!addedRoleNames.length) return;
@@ -177,11 +181,50 @@ function createBotApp({
     }));
   }
 
+  function registerShutdownHandlers() {
+    if (shutdownHandlersRegistered || typeof processLike.once !== "function") return;
+
+    shutdownHandlersRegistered = true;
+
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      processLike.once(signal, async () => {
+        try {
+          await stop({ signal });
+          processLike.exit?.(0);
+        } catch (error) {
+          logger.error(`Failed during Farmer Pets ${signal} shutdown:`, error);
+          processLike.exit?.(1);
+        }
+      });
+    }
+  }
+
+  async function stop({ signal } = {}) {
+    if (stopping) return;
+
+    stopping = true;
+
+    if (signal) {
+      logger.log(`Received ${signal}; shutting down Farmer Pets Bot.`);
+    }
+
+    if (typeof client.destroy === "function") {
+      await client.destroy();
+    }
+
+    if (typeof db.close === "function") {
+      await db.close();
+    }
+
+    logger.log("Farmer Pets Bot shutdown complete.");
+  }
+
   function startBot() {
     assertRuntimeConfig(config);
 
     registerBotReadyHandler();
     registerInteractionHandler();
+    registerShutdownHandlers();
 
     return client.login(config.TOKEN);
   }
@@ -192,7 +235,9 @@ function createBotApp({
     getActiveFarmEvent: () => activeFarmEvent,
     registerBotReadyHandler,
     registerInteractionHandler,
-    startBot
+    registerShutdownHandlers,
+    startBot,
+    stop
   };
 }
 

@@ -8,6 +8,12 @@ const pool = new Pool({
 });
 
 function createDatabase(dbPool, { logger = console } = {}) {
+  async function close() {
+    if (typeof dbPool.end === "function") {
+      await dbPool.end();
+    }
+  }
+
   async function initDatabase() {
     await validateRequiredTables();
 
@@ -275,6 +281,7 @@ function createDatabase(dbPool, { logger = console } = {}) {
 
   return {
     awardCommunityMilestoneReward,
+    close,
     ensurePlayer,
     getDailyCheckInState,
     getPayoutRows,
