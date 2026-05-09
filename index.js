@@ -41,16 +41,7 @@ const { getPacificDateKey, getYesterdayPacificDateKey } = require("./src/utils/d
 const { calculateDailyReward } = require("./src/utils/rewards");
 const { getEventAnnouncementTarget } = require("./src/utils/events");
 const { buildRescueButtonRow } = require("./src/ui/buttons");
-const {
-  buildAlreadyCheckedInEmbed,
-  buildCommunityEventEndEmbed,
-  buildCommunityGoalReachedEmbed,
-  buildDailyCheckInEmbed,
-  buildFarmEventEmbed,
-  buildFarmHelpEmbed,
-  buildRescueResultEmbed,
-  buildStatsEmbed
-} = require("./src/ui/embeds");
+const embedBuilders = require("./src/ui/embeds");
 const {
   awardCommunityMilestoneReward,
   ensurePlayer,
@@ -543,7 +534,7 @@ async function updateFarmEventMessage(farmEvent) {
 
     await farmEvent.message.edit({
       content: `<@&${FARMER_VERIFIED_ROLE}>`,
-      embeds: [buildFarmEventEmbed(farmEvent)],
+      embeds: [embedBuilders.buildFarmEventEmbed(farmEvent)],
       components: [buildRescueButtonRow()]
     });
   } catch (error) {
@@ -556,7 +547,7 @@ async function closeFarmEventMessage(farmEvent) {
     if (!farmEvent.message?.editable) return;
 
     await farmEvent.message.edit({
-      embeds: [buildFarmEventEmbed(farmEvent)],
+      embeds: [embedBuilders.buildFarmEventEmbed(farmEvent)],
       components: [buildRescueButtonRow(true)]
     });
   } catch (error) {
@@ -573,7 +564,7 @@ async function announceCommunityGoalReached(farmEvent) {
   const target = getEventAnnouncementTarget(farmEvent);
   if (!target?.isTextBased()) return;
 
-  await target.send({ embeds: [buildCommunityGoalReachedEmbed(farmEvent)] });
+  await target.send({ embeds: [embedBuilders.buildCommunityGoalReachedEmbed(farmEvent)] });
 }
 
 async function endFarmEvent(farmEvent) {
@@ -597,7 +588,7 @@ async function endFarmEvent(farmEvent) {
 
   const target = getEventAnnouncementTarget(farmEvent);
   if (target?.isTextBased()) {
-    await target.send({ embeds: [buildCommunityEventEndEmbed(farmEvent, rewardedCount)] });
+    await target.send({ embeds: [embedBuilders.buildCommunityEventEndEmbed(farmEvent, rewardedCount)] });
   }
 }
 
@@ -662,7 +653,7 @@ async function startFarmEvent() {
     farmEvent.channel = channel;
     farmEvent.message = await channel.send({
       content: pingRole,
-      embeds: [buildFarmEventEmbed(farmEvent)],
+      embeds: [embedBuilders.buildFarmEventEmbed(farmEvent)],
       components: [buildRescueButtonRow()]
     });
     farmEvent.thread = await createEventThread(farmEvent.message, farmEvent);
@@ -781,7 +772,7 @@ async function handleRescue(interaction) {
 
     attemptRecorded = true;
 
-    const resultEmbed = buildRescueResultEmbed({
+    const resultEmbed = embedBuilders.buildRescueResultEmbed({
       member,
       farmEvent,
       success,
@@ -881,7 +872,7 @@ async function handleFarmHelp(interaction) {
     await announceCommunityGoalReached(farmEvent);
   }
 
-  const helpEmbed = buildFarmHelpEmbed({
+  const helpEmbed = embedBuilders.buildFarmHelpEmbed({
     member: farmHelpMember,
     farmEvent,
     progressAdded
@@ -927,7 +918,7 @@ async function handleDailyCheckIn(interaction) {
 
   if (fpDailyLastCheckInKey === todayKey) {
     await interaction.reply({
-      embeds: [buildAlreadyCheckedInEmbed({
+      embeds: [embedBuilders.buildAlreadyCheckedInEmbed({
         displayName: member.displayName,
         lastDailyCheckIn: fpDailyLastCheckInKey,
         streak: Number(fpDailyCheckInState.daily_streak || 0)
@@ -945,7 +936,7 @@ async function handleDailyCheckIn(interaction) {
   const updated = await recordDailyCheckIn(interaction.user.id, reward.total, streak, todayKey);
 
   await interaction.reply({
-    embeds: [buildDailyCheckInEmbed({
+    embeds: [embedBuilders.buildDailyCheckInEmbed({
       displayName: member.displayName,
       wallet,
       streak: Number(updated.daily_streak || 0),
@@ -970,7 +961,7 @@ async function buildStatsPayload(discordId, displayName) {
 
   const row = await getStatsRow(discordId);
 
-  return { embeds: [buildStatsEmbed({ displayName, row, wallet })] };
+  return { embeds: [embedBuilders.buildStatsEmbed({ displayName, row, wallet })] };
 }
 
 async function buildLeaderboardMessage() {
