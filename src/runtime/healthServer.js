@@ -1,5 +1,7 @@
 const http = require("node:http");
 
+const { normalizePort } = require("../utils/ports");
+
 function createHealthServer({
   getActiveFarmEvent,
   logger = console,
@@ -38,13 +40,22 @@ function createHealthServer({
     if (port === undefined || port === null || port === "") return null;
     if (server) return server;
 
+    const normalizedPort = normalizePort(port);
+
+    if (normalizedPort === null) {
+      logger.warn?.(
+        `Invalid HEALTH_PORT/PORT value "${port}"; expected a whole number from 0 to 65535. Health server disabled.`
+      );
+      return null;
+    }
+
     server = http.createServer(requestHandler);
 
     await new Promise((resolve, reject) => {
       server.once("error", reject);
-      server.listen(Number(port), () => {
+      server.listen(normalizedPort, () => {
         server.off("error", reject);
-        logger.log(`Farmer Pets health server listening on port ${port}.`);
+        logger.log(`Farmer Pets health server listening on port ${normalizedPort}.`);
         resolve();
       });
     });

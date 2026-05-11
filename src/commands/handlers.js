@@ -1,3 +1,5 @@
+const { formatPortStatus } = require("../utils/ports");
+
 function createCommandHandlers({
   announceNewFarmerRoles,
   analyzeAssets,
@@ -260,7 +262,7 @@ async function handleHealthCommand(interaction, {
     `Active event: **${farmEvent ? farmEvent.name : "None"}**`,
     `Farm channel: **${config.FARM_CHANNEL || "Not configured"}**`,
     `Leaderboard channel: **${config.LEADERBOARD_CHANNEL || "Not configured"}**`,
-    `Health port: **${config.HEALTH_PORT || "Disabled"}**`
+    `Health port: **${formatPortStatus(config.HEALTH_PORT)}**`
   ];
 
   await interaction.reply({

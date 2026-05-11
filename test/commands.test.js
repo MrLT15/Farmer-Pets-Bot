@@ -247,7 +247,6 @@ test("fp-testevent blocks active events and starts when idle", async () => {
   assert.equal(idleInteraction.editReplyPayloads.at(-1), "Test Farmer Pets event started.");
 });
 
-
 test("fp-eventstatus reports missing and active event details", async () => {
   const missingHandlers = createHandlers();
   const missingInteraction = createMockInteraction();
@@ -335,6 +334,24 @@ test("fp-health reports runtime configuration and active event", async () => {
   assert.match(payload.content, /Uptime: \*\*1h 1m 1s\*\*/);
   assert.match(payload.content, /Active event: \*\*Pest Swarm\*\*/);
   assert.match(payload.content, /Health port: \*\*8080\*\*/);
+});
+
+test("fp-health reports invalid health port configuration without crashing", async () => {
+  const handlers = createHandlers({
+    config: {
+      FARM_CHANNEL: "farm-channel",
+      HEALTH_PORT: "HEALTH_PORT=3000",
+      LEADERBOARD_CHANNEL: "leaderboard-channel"
+    }
+  });
+  const interaction = createMockInteraction();
+
+  await handlers["fp-health"](interaction);
+
+  assert.match(
+    interaction.replyPayloads.at(-1).content,
+    /Health port: \*\*Invalid \(HEALTH_PORT=3000\)\*\*/
+  );
 });
 
 test("command helper formatting is stable", () => {

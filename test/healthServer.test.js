@@ -81,6 +81,20 @@ test("health server serves /health and / and rejects unknown paths", async () =>
   assert.equal(logs.at(-1), "Farmer Pets health server stopped.");
 });
 
+test("health server ignores invalid port values instead of crashing startup", async () => {
+  const warnings = [];
+  const server = createHealthServer({
+    getActiveFarmEvent: () => null,
+    logger: {
+      log: () => {},
+      warn: message => warnings.push(message)
+    }
+  });
+
+  assert.equal(await server.start("HEALTH_PORT=3000"), null);
+  assert.match(warnings[0], /Invalid HEALTH_PORT\/PORT value/);
+});
+
 test("health server start is optional and idempotent", async () => {
   const server = createHealthServer({ getActiveFarmEvent: () => null, logger: { log: () => {} } });
 

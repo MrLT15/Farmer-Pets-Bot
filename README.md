@@ -75,7 +75,7 @@ Admin-only operational commands:
 
 ## Health endpoint
 
-Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP server. `GET /health` returns uptime and active farm-event summary data, which is useful for deployment health checks.
+Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP server. `GET /health` returns uptime and active farm-event summary data, which is useful for deployment health checks. In Render, add an environment variable with key `HEALTH_PORT` and value `3000`; do not paste `HEALTH_PORT=3000` into the value field.
 
 ## Deployment diagnostics
 
