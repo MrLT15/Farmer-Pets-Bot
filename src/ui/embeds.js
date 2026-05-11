@@ -12,7 +12,7 @@ function buildFarmEventEmbed(farmEvent) {
   const fields = [
     {
       name: "⏳ Time Limit",
-      value: "5 minutes",
+      value: "30 minutes",
       inline: true
     },
     {

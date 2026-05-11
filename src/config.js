@@ -43,7 +43,11 @@ const FARMER_PETS_API = env("FARMER_PETS_API", "https://pets-api-main.herokuapp.
 const CONTRACT_ACCOUNT = env("CONTRACT_ACCOUNT", "farmerpetssc");
 
 const FLAGS_EPHEMERAL = 64;
+<<<<<<< codex/review-the-code-9ov9ml
+const FARM_EVENT_DURATION_MS = 30 * 60 * 1000;
+=======
 const FARM_EVENT_DURATION_MS = 5 * 60 * 1000;
+>>>>>>> main
 const ATOMIC_ASSET_PAGE_LIMIT = 1000;
 const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
 const HELP_FARM_BUTTON_CUSTOM_ID = "fp-help-farm-button";

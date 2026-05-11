@@ -43,6 +43,7 @@ test("createFarmEvent returns initialized event state", () => {
   const now = 10_000;
   const farmEvent = createFarmEvent(now);
 
+  assert.equal(FARM_EVENT_DURATION_MS, 30 * 60 * 1000);
   assert.equal(farmEvent.expires, now + FARM_EVENT_DURATION_MS);
   assert.ok(farmEvent.players instanceof Set);
   assert.ok(farmEvent.helpers instanceof Set);
