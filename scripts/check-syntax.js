@@ -1,9 +1,10 @@
-const { readdirSync, statSync } = require("fs");
+const { readdirSync, readFileSync, statSync } = require("fs");
 const { join, relative } = require("path");
 const { spawnSync } = require("child_process");
 
 const repoRoot = join(__dirname, "..");
 const ignoredDirectories = new Set([".git", "node_modules"]);
+const mergeConflictMarkerPattern = /^(<<<<<<<|=======|>>>>>>>)($|\s|[\w./-])/;
 
 function collectJavaScriptFiles(directory) {
   const files = [];
@@ -27,28 +28,79 @@ function collectJavaScriptFiles(directory) {
   return files;
 }
 
-const files = collectJavaScriptFiles(repoRoot).sort();
-let hasFailure = false;
+function findMergeConflictMarker(source) {
+  const lines = source.split(/\r?\n/);
 
-for (const file of files) {
-  const displayPath = relative(repoRoot, file);
+  for (const [index, line] of lines.entries()) {
+    if (mergeConflictMarkerPattern.test(line)) {
+      return { line: index + 1, text: line };
+    }
+  }
+
+  return null;
+}
+
+function checkJavaScriptFile(file, { root = repoRoot } = {}) {
+  const displayPath = relative(root, file);
+  const conflictMarker = findMergeConflictMarker(readFileSync(file, "utf8"));
+
+  if (conflictMarker) {
+    return {
+      ok: false,
+      displayPath,
+      conflictMarker
+    };
+  }
+
   const result = spawnSync(process.execPath, ["--check", file], {
-    cwd: repoRoot,
+    cwd: root,
     encoding: "utf8"
   });
 
-  if (result.status === 0) {
-    console.log(`✓ ${displayPath}`);
-    continue;
+  return {
+    ok: result.status === 0,
+    displayPath,
+    result
+  };
+}
+
+function runSyntaxCheck({ root = repoRoot } = {}) {
+  const files = collectJavaScriptFiles(root).sort();
+  let hasFailure = false;
+
+  for (const file of files) {
+    const check = checkJavaScriptFile(file, { root });
+
+    if (check.ok) {
+      console.log(`✓ ${check.displayPath}`);
+      continue;
+    }
+
+    hasFailure = true;
+    console.error(`✗ ${check.displayPath}`);
+
+    if (check.conflictMarker) {
+      console.error(
+        `Merge conflict marker found at line ${check.conflictMarker.line}: ${check.conflictMarker.text}`
+      );
+      console.error("Resolve the Git conflict markers before deploying.");
+      continue;
+    }
+
+    if (check.result.stdout) process.stdout.write(check.result.stdout);
+    if (check.result.stderr) process.stderr.write(check.result.stderr);
   }
 
-  hasFailure = true;
-  console.error(`✗ ${displayPath}`);
-
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
+  return hasFailure ? 1 : 0;
 }
 
-if (hasFailure) {
-  process.exit(1);
+if (require.main === module) {
+  process.exitCode = runSyntaxCheck();
 }
+
+module.exports = {
+  checkJavaScriptFile,
+  collectJavaScriptFiles,
+  findMergeConflictMarker,
+  runSyntaxCheck
+};
