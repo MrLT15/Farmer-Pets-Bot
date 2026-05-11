@@ -3,6 +3,7 @@ const { EmbedBuilder } = require("discord.js");
 const {
   COMMUNITY_HELPS_PER_PROGRESS,
   EMBED_COLORS,
+  FARM_EVENT_DURATION_MINUTES,
   PACIFIC_TIME_ZONE
 } = require("../config");
 const { formatNumber, formatPercent } = require("../utils/format");
@@ -12,7 +13,7 @@ function buildFarmEventEmbed(farmEvent) {
   const fields = [
     {
       name: "⏳ Time Limit",
-      value: "30 minutes",
+      value: `${FARM_EVENT_DURATION_MINUTES} minutes`,
       inline: true
     },
     {

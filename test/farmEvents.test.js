@@ -18,7 +18,11 @@ const {
   shouldAnnounceCommunityGoal,
   shouldAwardCommunityMilestone
 } = require("../src/services/farmEvents");
-const { COMMUNITY_HELPS_PER_PROGRESS, FARM_EVENT_DURATION_MS } = require("../src/config");
+const {
+  COMMUNITY_HELPS_PER_PROGRESS,
+  FARM_EVENT_DURATION_MINUTES,
+  FARM_EVENT_DURATION_MS
+} = require("../src/config");
 
 function makeEvent(overrides = {}) {
   return {
@@ -43,6 +47,7 @@ test("createFarmEvent returns initialized event state", () => {
   const now = 10_000;
   const farmEvent = createFarmEvent(now);
 
+  assert.equal(FARM_EVENT_DURATION_MINUTES, 30);
   assert.equal(FARM_EVENT_DURATION_MS, 30 * 60 * 1000);
   assert.equal(farmEvent.expires, now + FARM_EVENT_DURATION_MS);
   assert.ok(farmEvent.players instanceof Set);

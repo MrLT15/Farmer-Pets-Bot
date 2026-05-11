@@ -10,6 +10,16 @@ function envFlag(name, fallback = true) {
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
 }
 
+function envInteger(name, fallback) {
+  const value = process.env[name];
+
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
@@ -43,8 +53,7 @@ const FARMER_PETS_API = env("FARMER_PETS_API", "https://pets-api-main.herokuapp.
 const CONTRACT_ACCOUNT = env("CONTRACT_ACCOUNT", "farmerpetssc");
 
 const FLAGS_EPHEMERAL = 64;
-const FARM_EVENT_DURATION_MS = 30 * 60 * 1000;
-const FARM_EVENT_DURATION_MS = 30 * 60 * 1000;
+const FARM_EVENT_DURATION_MINUTES = envInteger("FARM_EVENT_DURATION_MINUTES", 30);
 const ATOMIC_ASSET_PAGE_LIMIT = 1000;
 const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
 const HELP_FARM_BUTTON_CUSTOM_ID = "fp-help-farm-button";
@@ -87,7 +96,8 @@ module.exports = {
   FARMER_PETS_API,
   CONTRACT_ACCOUNT,
   FLAGS_EPHEMERAL,
-  FARM_EVENT_DURATION_MS,
+  FARM_EVENT_DURATION_MINUTES,
+  FARM_EVENT_DURATION_MS: FARM_EVENT_DURATION_MINUTES * 60 * 1000,
   ATOMIC_ASSET_PAGE_LIMIT,
   RESCUE_BUTTON_CUSTOM_ID,
   HELP_FARM_BUTTON_CUSTOM_ID,
