@@ -44,6 +44,7 @@ const CONTRACT_ACCOUNT = env("CONTRACT_ACCOUNT", "farmerpetssc");
 
 const FLAGS_EPHEMERAL = 64;
 const FARM_EVENT_DURATION_MS = 30 * 60 * 1000;
+const FARM_EVENT_DURATION_MS = 30 * 60 * 1000;
 const ATOMIC_ASSET_PAGE_LIMIT = 1000;
 const RESCUE_BUTTON_CUSTOM_ID = "fp-rescue-button";
 const HELP_FARM_BUTTON_CUSTOM_ID = "fp-help-farm-button";
