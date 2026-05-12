@@ -65,7 +65,7 @@ test("analyzeAssets handles empty asset lists", () => {
 
 test("getSuccessChance applies role bonuses and caps chance", () => {
   const baseMember = makeMember();
-  assert.equal(getSuccessChance(baseMember), 0.4);
+  assert.equal(getSuccessChance(baseMember, {}, { season: "Spring" }), 0.35);
 
   const boostedMember = makeMember([
     ROLES.food.id,
@@ -74,7 +74,7 @@ test("getSuccessChance applies role bonuses and caps chance", () => {
     ROLES.tool.id,
     ROLES.fullFarm.id
   ]);
-  assert.equal(getSuccessChance(boostedMember), 0.75);
+  assert.equal(getSuccessChance(boostedMember, { securityForces: 20, companions: { dog: 1 } }, { season: "Spring" }), 0.81);
 });
 
 test("syncRoles adds and removes Discord roles from an asset analysis", async () => {

@@ -189,6 +189,39 @@ function createDatabase(dbPool, { logger = console } = {}) {
     return res.rows[0];
   }
 
+  async function awardCommunityEventPayouts(entries, reward, eventName) {
+    if (!entries.length || reward <= 0) return 0;
+
+    for (const entry of entries) {
+      await dbPool.query(
+        `
+        INSERT INTO farmerpets_logs (discord_id, wallet, event_name, success, reward)
+        VALUES ($1, $2, $3, TRUE, $4);
+        `,
+        [entry.discordId, entry.wallet, eventName, reward]
+      );
+
+      await dbPool.query(
+        `
+        INSERT INTO farmerpets_balances (
+          discord_id, wallet, payout_nkfe, lifetime_nkfe, weekly_nkfe, updated_at
+        )
+        VALUES ($1, $2, $3, $3, $3, NOW())
+        ON CONFLICT (discord_id)
+        DO UPDATE SET
+          wallet = EXCLUDED.wallet,
+          payout_nkfe = farmerpets_balances.payout_nkfe + EXCLUDED.payout_nkfe,
+          lifetime_nkfe = farmerpets_balances.lifetime_nkfe + EXCLUDED.lifetime_nkfe,
+          weekly_nkfe = farmerpets_balances.weekly_nkfe + EXCLUDED.weekly_nkfe,
+          updated_at = NOW();
+        `,
+        [entry.discordId, entry.wallet, reward]
+      );
+    }
+
+    return entries.length;
+  }
+
   async function getDailyCheckInState(discordId) {
     const res = await dbPool.query(
       `
@@ -280,6 +313,7 @@ function createDatabase(dbPool, { logger = console } = {}) {
 
 
   return {
+    awardCommunityEventPayouts,
     awardCommunityMilestoneReward,
     close,
     ensurePlayer,

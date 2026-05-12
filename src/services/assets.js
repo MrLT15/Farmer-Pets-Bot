@@ -24,16 +24,16 @@ function createAssetService({
     }
   }
 
-  async function getWalletAssets(wallet) {
+  async function getAtomicAssets(wallet, extraParams = {}) {
     const assets = [];
     let page = 1;
 
     while (true) {
       const params = new URLSearchParams({
         owner: wallet,
-        collection_name: "farmerpetsgo",
         limit: String(config.ATOMIC_ASSET_PAGE_LIMIT),
-        page: String(page)
+        page: String(page),
+        ...extraParams
       });
 
       const pageAssets = await getJsonSafe(`${config.ATOMIC_API}?${params.toString()}`);
@@ -45,6 +45,10 @@ function createAssetService({
     }
 
     return assets;
+  }
+
+  async function getWalletAssets(wallet) {
+    return getAtomicAssets(wallet, { collection_name: "farmerpetsgo" });
   }
 
   function makePseudoAssetFromRow(row, source) {
@@ -121,13 +125,36 @@ function createAssetService({
     return stakedAssets;
   }
 
+  async function getUtilityAssets(wallet) {
+    // Utility NFTs may live outside the Farmer Pets collection. Limit this to a
+    // single owner-scoped AtomicAssets page so detection is useful without an
+    // unbounded all-NFT crawl. Keyword analysis handles unknown templates.
+    const params = new URLSearchParams({
+      owner: wallet,
+      limit: String(config.ATOMIC_ASSET_PAGE_LIMIT),
+      page: "1"
+    });
+
+    return getJsonSafe(`${config.ATOMIC_API}?${params.toString()}`);
+  }
+
   async function getAssets(wallet) {
     const walletAssets = await getWalletAssets(wallet);
     const stakedAssets = await getStakedAssets(wallet);
+    let utilityAssets = [];
+    let utilityScanFailed = false;
+
+    try {
+      utilityAssets = await getUtilityAssets(wallet);
+    } catch (error) {
+      utilityScanFailed = true;
+    }
 
     return {
       walletAssets,
       stakedAssets,
+      utilityAssets,
+      utilityScanFailed,
       combinedAssets: [...walletAssets, ...stakedAssets]
     };
   }
@@ -135,8 +162,10 @@ function createAssetService({
   return {
     buildRowsUrl,
     getAssets,
+    getAtomicAssets,
     getJsonSafe,
     getStakedAssets,
+    getUtilityAssets,
     getWalletAssets,
     makePseudoAssetFromRow
   };

@@ -33,6 +33,7 @@ test("createDatabase exposes the database helper surface", () => {
   const db = createDatabase(createMockPool());
 
   assert.deepEqual(Object.keys(db).sort(), [
+    "awardCommunityEventPayouts",
     "awardCommunityMilestoneReward",
     "close",
     "ensurePlayer",

@@ -1,4 +1,5 @@
 const { ROLES } = require("../config");
+const { getSuccessChance } = require("./rescueBonuses");
 
 function analyzeAssets(assets) {
   let food = 0;
@@ -79,18 +80,6 @@ async function syncRoles(member, analysis) {
   }
 
   return { added, removed };
-}
-
-function getSuccessChance(member) {
-  let chance = 0.4;
-
-  if (member.roles.cache.has(ROLES.food.id)) chance += 0.05;
-  if (member.roles.cache.has(ROLES.wood.id)) chance += 0.05;
-  if (member.roles.cache.has(ROLES.silver.id)) chance += 0.05;
-  if (member.roles.cache.has(ROLES.tool.id)) chance += 0.10;
-  if (member.roles.cache.has(ROLES.fullFarm.id)) chance += 0.15;
-
-  return Math.min(chance, 0.75);
 }
 
 module.exports = {

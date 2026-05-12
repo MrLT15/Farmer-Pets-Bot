@@ -4,31 +4,49 @@ const {
   COMMUNITY_HELPS_PER_PROGRESS,
   EMBED_COLORS,
   FARM_EVENT_DURATION_MINUTES,
+  COMMUNITY_EVENT_DURATION_MINUTES,
   PACIFIC_TIME_ZONE
 } = require("../config");
 const { formatNumber, formatPercent } = require("../utils/format");
 const { makeProgressBar } = require("../utils/progress");
+const { getSeasonDescription } = require("../services/seasons");
+const { getCommunityEventPool, getSharedCommunityPayout } = require("../services/farmEvents");
 
 function buildFarmEventEmbed(farmEvent) {
   const fields = [
     {
       name: "⏳ Time Limit",
-      value: `${FARM_EVENT_DURATION_MINUTES} minutes`,
+      value: `${farmEvent.type === "community" ? COMMUNITY_EVENT_DURATION_MINUTES : FARM_EVENT_DURATION_MINUTES} minutes`,
       inline: true
     },
     {
       name: "💰 Rescue Reward",
-      value: `${farmEvent.rewardMin}-${farmEvent.rewardMax} $NKFE`,
+      value: farmEvent.type === "community"
+        ? `Shared pool up to **${farmEvent.communityPoolMax || 200} $NKFE**`
+        : `${farmEvent.rewardMin}-${farmEvent.rewardMax} $NKFE`,
       inline: true
     },
     {
       name: "🎮 How to Join",
       value: "Run `/fp-rescue`, press **Rescue Pet**, or press **Help the Farm** after your attempt.",
       inline: false
+    },
+    {
+      name: "🌍 Current Season",
+      value: `${farmEvent.season || "Spring"}\n${getSeasonDescription(farmEvent.season || "Spring", farmEvent.summerBoostResource)}`,
+      inline: false
     }
   ];
 
-  if (farmEvent.isCommunity) {
+  if (farmEvent.type === "community") {
+    fields.splice(2, 0, {
+      name: "👑 Commander Event",
+      value:
+        `Started by: **${farmEvent.commanderStarterName || "Commander"}**\n` +
+        `Shared pool: **${getCommunityEventPool(farmEvent)} $NKFE**; successful rescuers split the pool at event end.`,
+      inline: false
+    });
+  } else if (farmEvent.isCommunity) {
     fields.splice(2, 0, {
       name: "🤝 Community Goal",
       value:
@@ -54,7 +72,7 @@ function buildFarmEventEmbed(farmEvent) {
     .setTimestamp();
 }
 
-function buildRescueResultEmbed({ member, farmEvent, success, reward, successChance, streak }) {
+function buildRescueResultEmbed({ member, farmEvent, success, reward, successChance, streak, bonusBreakdown }) {
   const currentStreak = Number(streak?.current_rescue_streak || 0);
   const bestStreak = Number(streak?.best_rescue_streak || 0);
   const fields = [
@@ -66,7 +84,18 @@ function buildRescueResultEmbed({ member, farmEvent, success, reward, successCha
     { name: "Best Streak", value: `${bestStreak}`, inline: true }
   ];
 
-  if (farmEvent.isCommunity) {
+  if (bonusBreakdown?.total) {
+    fields.push({
+      name: "NFT Reward Bonus",
+      value: [
+        bonusBreakdown.ndvBonus ? `NDV: +${bonusBreakdown.ndvBonus} $NKFE` : null,
+        bonusBreakdown.parrotBonus ? `Parrot: +${bonusBreakdown.parrotBonus} $NKFE` : null
+      ].filter(Boolean).join("\n"),
+      inline: false
+    });
+  }
+
+  if (farmEvent.isCommunity && farmEvent.type !== "community") {
     fields.push({
       name: "🤝 Co-op Progress",
       value:
@@ -105,6 +134,8 @@ function buildCommunityGoalReachedEmbed(farmEvent) {
 }
 
 function buildCommunityEventEndEmbed(farmEvent, rewardedCount) {
+  if (farmEvent.type === "community") return buildCommanderCommunityEventEndEmbed(farmEvent, rewardedCount);
+
   const goalMet = farmEvent.communitySuccesses >= farmEvent.communityGoal;
 
   return new EmbedBuilder()
@@ -140,13 +171,37 @@ function buildCommunityEventEndEmbed(farmEvent, rewardedCount) {
     .setTimestamp();
 }
 
+function buildCommanderCommunityEventEndEmbed(farmEvent, rewardedCount) {
+  const pool = getCommunityEventPool(farmEvent);
+  const payout = getSharedCommunityPayout(farmEvent);
+  const successCount = farmEvent.successfulRescuers?.size || 0;
+
+  return new EmbedBuilder()
+    .setColor(successCount ? EMBED_COLORS.success : EMBED_COLORS.warning)
+    .setTitle(successCount ? "👑 Commander Community Rescue Complete" : "👑 Commander Community Rescue Ended")
+    .setDescription(
+      successCount
+        ? `**${successCount}** successful rescuer(s) split the Commander event pool.`
+        : "No successful rescues this time, so the shared pool was not paid out."
+    )
+    .addFields(
+      { name: "Commander", value: `**${farmEvent.commanderStarterName || "Commander"}**`, inline: true },
+      { name: "Participants", value: `**${farmEvent.players?.size || 0}**`, inline: true },
+      { name: "Successful Rescuers", value: `**${successCount}**`, inline: true },
+      { name: "Shared Pool", value: `**${pool} $NKFE**`, inline: true },
+      { name: "Payout Each", value: payout ? `**${payout} $NKFE**` : "No payout", inline: true },
+      { name: "Paid Farmers", value: `**${rewardedCount}**`, inline: true }
+    )
+    .setTimestamp();
+}
+
 function buildFarmHelpEmbed({ member, farmEvent, progressAdded }) {
   const fields = [
     { name: "Farmhand", value: `**${member.displayName}**`, inline: true },
     { name: "Event", value: farmEvent.name, inline: true }
   ];
 
-  if (farmEvent.isCommunity) {
+  if (farmEvent.isCommunity && farmEvent.type !== "community") {
     fields.push(
       {
         name: "Farmhand Help",

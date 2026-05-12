@@ -108,10 +108,7 @@ test("handleRescue releases reserved attempt when wallet is missing", async () =
 
   await handlers.handleRescue(interaction);
 
-  assert.deepEqual(state.calls, [
-    ["reserve", "farmer"],
-    ["release", "farmer"]
-  ]);
+  assert.deepEqual(state.calls, []);
   assert.equal(state.farmEvent.players.has("farmer"), false);
   assert.deepEqual(interaction.replyPayloads.at(-1), {
     content: "You must verify your wallet first using `/verify`.",

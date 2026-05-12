@@ -1,13 +1,16 @@
 const { logDiscordPermissionWarning } = require("../utils/discordErrors");
+const { getSharedCommunityPayout } = require("../services/farmEvents");
 
 function createFarmEventDiscordRuntime({
   client,
   farmChannelId,
   farmerVerifiedRoleId,
   enableEventThreads = true,
+  awardCommunityEventPayouts = async () => 0,
   awardCommunityMilestoneReward,
   buildRescueButtonRow,
   createFarmEvent,
+  createCommanderCommunityEvent,
   embedBuilders,
   getActiveFarmEvent,
   getEventAnnouncementTarget,
@@ -108,10 +111,25 @@ function createFarmEventDiscordRuntime({
 
     let rewardedCount = 0;
 
+    if (farmEvent.type === "community") {
+      const payout = getSharedCommunityPayout(farmEvent);
+      const entries = [...(farmEvent.successfulRescuers || new Map()).entries()]
+        .map(([discordId, wallet]) => ({ discordId, wallet }));
+
+      rewardedCount = await awardCommunityEventPayouts(entries, payout, farmEvent.name);
+
+      await sendEmbedToEventTarget(
+        farmEvent,
+        embedBuilders.buildCommunityEventEndEmbed(farmEvent, rewardedCount),
+        "Could not announce Farmer Pets community event end."
+      );
+      return;
+    }
+
     if (shouldAwardCommunityMilestone(farmEvent)) {
       markCommunityMilestoneAwarded(farmEvent);
       rewardedCount = await awardCommunityMilestoneReward(
-        [...farmEvent.players],
+        [...farmEvent.players.keys()],
         farmEvent.communityBonus
       );
     }
@@ -123,11 +141,22 @@ function createFarmEventDiscordRuntime({
     );
   }
 
+  async function startCommunityFarmEvent(starter) {
+    if (getActiveFarmEvent()) return false;
+
+    const farmEvent = createCommanderCommunityEvent(starter);
+    return startPreparedFarmEvent(farmEvent);
+  }
+
   async function startFarmEvent() {
     if (getActiveFarmEvent()) return false;
 
     const farmEvent = createFarmEvent();
 
+    return startPreparedFarmEvent(farmEvent);
+  }
+
+  async function startPreparedFarmEvent(farmEvent) {
     setActiveFarmEvent(farmEvent);
 
     try {
@@ -192,6 +221,7 @@ function createFarmEventDiscordRuntime({
     createEventThread,
     endFarmEvent,
     scheduleEvent,
+    startCommunityFarmEvent,
     startFarmEvent,
     updateFarmEventMessage
   };

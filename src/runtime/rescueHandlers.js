@@ -8,9 +8,13 @@ function createRescueHandlers({
   getActiveFarmEvent,
   getEventAnnouncementTarget,
   getFarmHelpBlockReason,
+  getAssets = async () => ({ combinedAssets: [], utilityAssets: [] }),
   getRescueBlockReason,
   getRescueReward,
+  getRewardBonus = () => ({ total: 0 }),
   getSuccessChance,
+  analyzeAssets = () => ({}),
+  analyzeUtilityAssets = () => ({}),
   getWallet,
   recordCommunitySuccess,
   recordFarmHelp,
@@ -24,17 +28,13 @@ function createRescueHandlers({
   async function handleRescue(interaction) {
     const farmEvent = getActiveFarmEvent();
 
-    const rescueBlockReason = getRescueBlockReason(farmEvent, interaction.user.id);
-
-    if (rescueBlockReason) {
+    if (!farmEvent) {
       await interaction.reply({
-        content: rescueBlockReason,
+        content: "No active farm emergency.",
         flags: flagsEphemeral
       });
       return;
     }
-
-    reserveRescueAttempt(farmEvent, interaction.user.id);
 
     let attemptRecorded = false;
 
@@ -42,8 +42,6 @@ function createRescueHandlers({
       const wallet = await getWallet(interaction.user.id);
 
       if (!wallet) {
-        releaseRescueAttempt(farmEvent, interaction.user.id);
-
         await interaction.reply({
           content: "You must verify your wallet first using `/verify`.",
           flags: flagsEphemeral
@@ -52,12 +50,25 @@ function createRescueHandlers({
       }
 
       const member = await interaction.guild.members.fetch(interaction.user.id);
+      const profile = await buildRescueProfile(wallet);
+      const rescueBlockReason = getRescueBlockReason(farmEvent, interaction.user.id, Date.now(), profile);
+
+      if (rescueBlockReason) {
+        await interaction.reply({
+          content: rescueBlockReason,
+          flags: flagsEphemeral
+        });
+        return;
+      }
+
+      reserveRescueAttempt(farmEvent, interaction.user.id);
 
       await ensurePlayer(interaction.user.id, wallet);
 
-      const successChance = getSuccessChance(member);
+      const successChance = getSuccessChance(member, profile, farmEvent);
       const success = random() < successChance;
-      const reward = getRescueReward(farmEvent, success);
+      const reward = getRescueReward(farmEvent, success, profile);
+      const bonusBreakdown = success ? getRewardBonus(profile) : { total: 0 };
 
       const streak = await recordRescue(
         interaction.user.id,
@@ -67,7 +78,7 @@ function createRescueHandlers({
         reward
       );
 
-      if (success && recordCommunitySuccess(farmEvent)) {
+      if (success && recordCommunitySuccess(farmEvent, interaction.user.id, wallet)) {
         await updateFarmEventMessage(farmEvent);
         await announceCommunityGoalReached(farmEvent);
       }
@@ -80,7 +91,8 @@ function createRescueHandlers({
         success,
         reward,
         successChance,
-        streak
+        streak,
+        bonusBreakdown
       });
 
       await interaction.reply({
@@ -95,6 +107,22 @@ function createRescueHandlers({
       }
 
       throw error;
+    }
+  }
+
+  async function buildRescueProfile(wallet) {
+    try {
+      const assetData = await getAssets(wallet);
+      return {
+        ...analyzeAssets(assetData.combinedAssets || []),
+        ...analyzeUtilityAssets([
+          ...(assetData.combinedAssets || []),
+          ...(assetData.utilityAssets || [])
+        ])
+      };
+    } catch (error) {
+      logger.error("Failed to build Farmer Pets rescue NFT profile:", error);
+      return {};
     }
   }
 
@@ -121,7 +149,7 @@ function createRescueHandlers({
       return;
     }
 
-    if (!farmEvent.players.has(interaction.user.id)) {
+    if (!farmEvent.players?.has(interaction.user.id)) {
       await interaction.reply({
         content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
         flags: flagsEphemeral

@@ -5,6 +5,7 @@ const { getEventAnnouncementTarget } = require("./utils/events");
 const { buildRescueButtonRow } = require("./ui/buttons");
 const embedBuilders = require("./ui/embeds");
 const { getAssets } = require("./services/assets");
+const { analyzeUtilityAssets, getRewardBonus } = require("./services/utilityProfile");
 const { analyzeAssets, getSuccessChance, syncRoles } = require("./services/roles");
 const {
   buildLeaderboardMessage,
@@ -56,6 +57,7 @@ function createBotApp({
   db = database,
   eventService = farmEvents,
   roleService = { analyzeAssets, getSuccessChance, syncRoles },
+  utilityService = { analyzeUtilityAssets, getRewardBonus },
   playerStatsService = {
     buildLeaderboardMessage,
     buildStatsPayload,
@@ -83,6 +85,7 @@ function createBotApp({
   });
   let stopping = false;
   let shutdownHandlersRegistered = false;
+  const commanderEventCooldowns = new Map();
 
   async function announceNewFarmerRoles(member, wallet, addedRoleNames) {
     if (!addedRoleNames.length) return;
@@ -104,9 +107,11 @@ function createBotApp({
     farmChannelId: config.FARM_CHANNEL,
     farmerVerifiedRoleId: config.FARMER_VERIFIED_ROLE,
     enableEventThreads: config.ENABLE_EVENT_THREADS,
+    awardCommunityEventPayouts: db.awardCommunityEventPayouts,
     awardCommunityMilestoneReward: db.awardCommunityMilestoneReward,
     buildRescueButtonRow: ui.buildRescueButtonRow,
     createFarmEvent: eventService.createFarmEvent,
+    createCommanderCommunityEvent: eventService.createCommanderCommunityEvent,
     embedBuilders: ui.embedBuilders,
     getActiveFarmEvent: () => activeFarmEvent,
     getEventAnnouncementTarget: utils.getEventAnnouncementTarget,
@@ -126,6 +131,7 @@ function createBotApp({
   const {
     announceCommunityGoalReached,
     scheduleEvent,
+    startCommunityFarmEvent,
     startFarmEvent,
     updateFarmEventMessage
   } = farmEventDiscord;
@@ -137,9 +143,13 @@ function createBotApp({
     flagsEphemeral: config.FLAGS_EPHEMERAL,
     getActiveFarmEvent: () => activeFarmEvent,
     getEventAnnouncementTarget: utils.getEventAnnouncementTarget,
+    getAssets: assetService.getAssets,
+    analyzeAssets: roleService.analyzeAssets,
+    analyzeUtilityAssets: utilityService.analyzeUtilityAssets,
     getFarmHelpBlockReason: eventService.getFarmHelpBlockReason,
     getRescueBlockReason: eventService.getRescueBlockReason,
     getRescueReward: eventService.getRescueReward,
+    getRewardBonus: utilityService.getRewardBonus,
     getSuccessChance: roleService.getSuccessChance,
     getWallet: db.getWallet,
     recordCommunitySuccess: eventService.recordCommunitySuccess,
@@ -181,6 +191,7 @@ function createBotApp({
     const commandHandlers = runtimes.createCommandHandlers({
       announceNewFarmerRoles,
       analyzeAssets: roleService.analyzeAssets,
+      analyzeUtilityAssets: utilityService.analyzeUtilityAssets,
       buildLeaderboardMessage: playerStatsService.buildLeaderboardMessage,
       buildStatsPayload: playerStatsService.buildStatsPayload,
       cancelActiveFarmEvent,
@@ -190,12 +201,14 @@ function createBotApp({
       getPayoutRows: db.getPayoutRows,
       getWallet: db.getWallet,
       getActiveFarmEvent: () => activeFarmEvent,
+      commanderEventCooldowns,
       getRemainingEventMs: eventService.getRemainingEventMs,
       handleDailyCheckIn: playerStatsService.handleDailyCheckIn,
       handleRescue,
       postWeeklyLeaderboardAndReset: () => playerStatsService.postWeeklyLeaderboardAndReset(client),
       resetPayouts: db.resetPayouts,
-      startFarmEvent,
+      startCommunityFarmEvent,
+    startFarmEvent,
       syncRoles: roleService.syncRoles,
       uptime: processLike.uptime ? () => processLike.uptime() : undefined
     });

@@ -26,7 +26,8 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARMER_*_ROLE_ID` | Recommended | Role IDs used by `/fp-roles` and event pings. Defaults to Farmer Pets production roles. |
 | `HEALTH_PORT` or `PORT` | Optional | Starts a lightweight HTTP health endpoint at `/health` for web-service hosts. |
 | `ENABLE_EVENT_THREADS` | Optional | Defaults to `true`; set to `false` if the bot should skip per-event Discord thread creation. |
-| `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `30`; controls how long rescue events stay open. |
+| `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `5`; controls how long normal rescue events stay open. |
+| `COMMUNITY_EVENT_DURATION_MINUTES` | Optional | Defaults to `10`; controls Commander-started community event duration. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
@@ -63,6 +64,7 @@ General commands:
 - `/fp-stats` — show your Farmer Pets stats.
 - `/fp-daily` — claim the daily check-in reward.
 - `/fp-leaderboard` — show the weekly leaderboard.
+- `/fp-communityevent` — Commander NFT holders can start a 10-minute shared-pool community rescue when no event is active.
 
 Admin-only operational commands:
 
@@ -73,6 +75,12 @@ Admin-only operational commands:
 - `/fp-payouts` — show outstanding manual $NKFE payouts.
 - `/fp-resetpayouts` — reset payout balances after manual payment.
 - `/fp-testevent` — start a test event when no event is active.
+
+## Mini-game mechanics
+
+Rescue success starts at **35%** and can increase from Discord roles, seasonal bonuses, Security Forces NFTs, and Dog companions, but total chance is capped at **85%**. NDV and Parrot utility bonuses add $NKFE only on successful normal rescues. NPC holders receive one extra rescue attempt per active event. Commander NFT holders can start a 10-minute community rescue with a shared payout pool when no other farm event is active.
+
+Normal rescue events default to a 5-minute window and continue to spawn every 2–4 hours.
 
 ## Health endpoint
 

@@ -22,6 +22,10 @@ const commands = [
     .setDescription("Show the Farmer Pets weekly leaderboard"),
 
   new SlashCommandBuilder()
+    .setName("fp-communityevent")
+    .setDescription("Start a Commander-led Farmer Pets community rescue event"),
+
+  new SlashCommandBuilder()
     .setName("fp-payouts")
     .setDescription("Admin: show Farmer Pets NKFE payouts owed")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),

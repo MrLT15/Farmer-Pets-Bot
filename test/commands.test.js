@@ -354,6 +354,36 @@ test("fp-health reports invalid health port configuration without crashing", asy
   );
 });
 
+
+test("fp-communityevent requires Commander NFT and starts eligible events", async () => {
+  const noCommander = createHandlers({
+    analyzeUtilityAssets: () => ({ commander: 0, companions: {} }),
+    getAssets: async () => ({ combinedAssets: [], utilityAssets: [] })
+  });
+  const noCommanderInteraction = createMockInteraction();
+
+  await noCommander["fp-communityevent"](noCommanderInteraction);
+
+  assert.equal(noCommanderInteraction.editReplyPayloads.at(-1), "Commander NFT required to start a community rescue event.");
+
+  let startedWith = null;
+  const commander = createHandlers({
+    analyzeUtilityAssets: () => ({ commander: 1, companions: {} }),
+    getAssets: async () => ({ combinedAssets: [], utilityAssets: [{ name: "Commander" }] }),
+    startCommunityFarmEvent: async starter => {
+      startedWith = starter;
+      return true;
+    }
+  });
+  const commanderInteraction = createMockInteraction({ displayName: "Commander Alice" });
+
+  await commander["fp-communityevent"](commanderInteraction);
+
+  assert.equal(startedWith.starterId, "discord-user");
+  assert.equal(startedWith.starterName, "Commander Alice");
+  assert.equal(commanderInteraction.editReplyPayloads.at(-1), "Commander community rescue event started in fp-general.");
+});
+
 test("command helper formatting is stable", () => {
   assert.equal(formatDuration(0), "0s");
   assert.equal(formatDuration(61000), "1m 1s");

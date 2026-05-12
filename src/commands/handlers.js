@@ -3,6 +3,7 @@ const { formatPortStatus } = require("../utils/ports");
 function createCommandHandlers({
   announceNewFarmerRoles,
   analyzeAssets,
+  analyzeUtilityAssets = () => ({}),
   buildLeaderboardMessage,
   buildStatsPayload,
   cancelActiveFarmEvent,
@@ -12,11 +13,13 @@ function createCommandHandlers({
   getPayoutRows,
   getWallet,
   getActiveFarmEvent,
+  commanderEventCooldowns = new Map(),
   getRemainingEventMs = farmEvent => Math.max((farmEvent?.expires || Date.now()) - Date.now(), 0),
   handleDailyCheckIn,
   handleRescue,
   postWeeklyLeaderboardAndReset,
   resetPayouts,
+  startCommunityFarmEvent,
   startFarmEvent,
   syncRoles,
   uptime = () => process.uptime()
@@ -26,6 +29,7 @@ function createCommandHandlers({
     "fp-roles": interaction => handleRolesCommand(interaction, {
       announceNewFarmerRoles,
       analyzeAssets,
+      analyzeUtilityAssets,
       flagsEphemeral,
       getAssets,
       getWallet,
@@ -38,6 +42,15 @@ function createCommandHandlers({
     "fp-daily": handleDailyCheckIn,
     "fp-leaderboard": interaction => handleLeaderboardCommand(interaction, {
       buildLeaderboardMessage
+    }),
+    "fp-communityevent": interaction => handleCommunityEventCommand(interaction, {
+      analyzeUtilityAssets,
+      commanderEventCooldowns,
+      flagsEphemeral,
+      getActiveFarmEvent,
+      getAssets,
+      getWallet,
+      startCommunityFarmEvent
     }),
     "fp-payouts": interaction => handlePayoutsCommand(interaction, {
       flagsEphemeral,
@@ -78,6 +91,7 @@ function createCommandHandlers({
 async function handleRolesCommand(interaction, {
   announceNewFarmerRoles,
   analyzeAssets,
+  analyzeUtilityAssets,
   flagsEphemeral,
   getAssets,
   getWallet,
@@ -105,6 +119,11 @@ async function handleRolesCommand(interaction, {
   }
 
   const analysis = analyzeAssets(assetData.combinedAssets);
+  const utilityProfile = analyzeUtilityAssets([
+    ...(assetData.combinedAssets || []),
+    ...(assetData.utilityAssets || [])
+  ]);
+  const companions = utilityProfile.companions || { dog: 0, cat: 0, bunny: 0, parrot: 0 };
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
   const roleResult = await syncRoles(member, analysis);
@@ -123,6 +142,12 @@ async function handleRolesCommand(interaction, {
     `🪵 Wood Assets: **${analysis.wood}**\n` +
     `🥈 Silver Assets: **${analysis.silver}**\n` +
     `🛠️ Tool Assets: **${analysis.tool}**\n\n` +
+    `🛡️ Security Forces: **${utilityProfile.securityForces}**\n` +
+    `🚚 NDV Utility: **${utilityProfile.ndv}** (${utilityProfile.largeNdv} large/legendary)\n` +
+    `🚌 NPC Utility: **${utilityProfile.npc}**\n` +
+    `👑 Commander NFTs: **${utilityProfile.commander}**\n` +
+    `🐾 Companions: Dog **${companions.dog || 0}**, Cat **${companions.cat || 0}**, Bunny **${companions.bunny || 0}**, Parrot **${companions.parrot || 0}**\n` +
+    `${assetData.utilityScanFailed ? "⚠️ Utility NFT scan failed; showing Farmer Pets-only utility matches.\n" : ""}\n` +
     `**Roles Added:**\n${roleResult.added.length ? roleResult.added.join("\n") : "None"}\n\n` +
     `**Roles Removed:**\n${roleResult.removed.length ? roleResult.removed.join("\n") : "None"}`
   );
@@ -144,6 +169,72 @@ async function handleLeaderboardCommand(interaction, { buildLeaderboardMessage }
   await interaction.reply({
     content: message
   });
+}
+
+async function handleCommunityEventCommand(interaction, {
+  analyzeUtilityAssets,
+  commanderEventCooldowns,
+  flagsEphemeral,
+  getActiveFarmEvent,
+  getAssets,
+  getWallet,
+  startCommunityFarmEvent
+}) {
+  await interaction.deferReply({ flags: flagsEphemeral });
+
+  if (getActiveFarmEvent()) {
+    await interaction.editReply("A Farmer Pets event is already active. Try again after it ends.");
+    return;
+  }
+
+  const wallet = await getWallet(interaction.user.id);
+
+  if (!wallet) {
+    await interaction.editReply("You must verify your wallet first using `/verify`.");
+    return;
+  }
+
+  const lastStartedAt = commanderEventCooldowns.get(interaction.user.id) || 0;
+  const cooldownMs = 24 * 60 * 60 * 1000;
+
+  if (Date.now() - lastStartedAt < cooldownMs) {
+    const remainingMs = cooldownMs - (Date.now() - lastStartedAt);
+    await interaction.editReply(`Commander event cooldown active. Try again in **${formatDuration(remainingMs)}**.`);
+    return;
+  }
+
+  let assetData;
+
+  try {
+    assetData = await getAssets(wallet);
+  } catch (error) {
+    await interaction.editReply("NFT utility services are unavailable right now; no event was started.");
+    return;
+  }
+
+  const profile = analyzeUtilityAssets([
+    ...(assetData.combinedAssets || []),
+    ...(assetData.utilityAssets || [])
+  ]);
+
+  if (!profile.commander) {
+    await interaction.editReply("Commander NFT required to start a community rescue event.");
+    return;
+  }
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const started = await startCommunityFarmEvent({
+    starterId: interaction.user.id,
+    starterName: member.displayName
+  });
+
+  if (!started) {
+    await interaction.editReply("A Farmer Pets event is already active. Try again after it ends.");
+    return;
+  }
+
+  commanderEventCooldowns.set(interaction.user.id, Date.now());
+  await interaction.editReply("Commander community rescue event started in fp-general.");
 }
 
 async function handlePayoutsCommand(interaction, { flagsEphemeral, getPayoutRows }) {
@@ -203,6 +294,7 @@ async function handleTestEventCommand(interaction, {
 async function handleEventStatusCommand(interaction, {
   flagsEphemeral,
   getActiveFarmEvent,
+  commanderEventCooldowns = new Map(),
   getRemainingEventMs
 }) {
   const farmEvent = getActiveFarmEvent();

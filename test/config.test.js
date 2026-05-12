@@ -27,7 +27,8 @@ const ENV_NAMES = [
   "HEALTH_PORT",
   "PORT",
   "ENABLE_EVENT_THREADS",
-  "FARM_EVENT_DURATION_MINUTES"
+  "FARM_EVENT_DURATION_MINUTES",
+  "COMMUNITY_EVENT_DURATION_MINUTES"
 ];
 
 function withConfigEnv(overrides, callback) {
@@ -69,8 +70,10 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
     assert.equal(config.HEALTH_PORT, undefined);
     assert.equal(config.ENABLE_EVENT_THREADS, true);
-    assert.equal(config.FARM_EVENT_DURATION_MINUTES, 30);
-    assert.equal(config.FARM_EVENT_DURATION_MS, 30 * 60 * 1000);
+    assert.equal(config.FARM_EVENT_DURATION_MINUTES, 5);
+    assert.equal(config.FARM_EVENT_DURATION_MS, 5 * 60 * 1000);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MINUTES, 10);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MS, 10 * 60 * 1000);
   });
 });
 
@@ -90,7 +93,8 @@ test("config allows deployment environment to override channel, role, and API va
     CONTRACT_ACCOUNT: "contractacct",
     HEALTH_PORT: "8080",
     ENABLE_EVENT_THREADS: "false",
-    FARM_EVENT_DURATION_MINUTES: "45"
+    FARM_EVENT_DURATION_MINUTES: "45",
+    COMMUNITY_EVENT_DURATION_MINUTES: "12"
   }, config => {
     assert.equal(config.FARM_CHANNEL, "farm-channel-from-env");
     assert.equal(config.LEADERBOARD_CHANNEL, "leaderboard-channel-from-env");
@@ -108,6 +112,8 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.ENABLE_EVENT_THREADS, false);
     assert.equal(config.FARM_EVENT_DURATION_MINUTES, 45);
     assert.equal(config.FARM_EVENT_DURATION_MS, 45 * 60 * 1000);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MINUTES, 12);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MS, 12 * 60 * 1000);
   });
 });
 
