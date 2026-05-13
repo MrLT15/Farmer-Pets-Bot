@@ -1,7 +1,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createPayoutService } = require("../src/services/payouts");
+const {
+  createPayoutService,
+  getMissingDirectWithdrawalConfig
+} = require("../src/services/payouts");
 
 test("weekly payout summary points players to self-service withdrawals", () => {
   const service = createPayoutService({
@@ -23,6 +26,14 @@ test("weekly payout summary points players to self-service withdrawals", () => {
   assert.match(summary, /roadisledger/);
 });
 
+test("getMissingDirectWithdrawalConfig lists direct withdrawal variables that are absent", () => {
+  assert.deepEqual(getMissingDirectWithdrawalConfig({ WAX_RPC_URL: "https://wax.example" }), [
+    "NKFE_TOKEN_CONTRACT",
+    "NKFE_PAYOUT_SOURCE_WALLET",
+    "NKFE_TREASURY_PRIVATE_KEY"
+  ]);
+});
+
 test("sendWithdrawal reports missing provider configuration", async () => {
   const service = createPayoutService({
     config: {
@@ -32,10 +43,14 @@ test("sendWithdrawal reports missing provider configuration", async () => {
   });
 
   assert.equal(service.isWithdrawalConfigured(), false);
-  assert.deepEqual(await service.sendWithdrawal({ wallet: "abc.wam", amount: 3 }), {
-    ok: false,
-    error: "Automatic $NKFE withdrawals are not configured yet."
-  });
+  const result = await service.sendWithdrawal({ wallet: "abc.wam", amount: 3 });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Automatic \$NKFE withdrawals are not configured yet/);
+  assert.match(result.error, /WAX_RPC_URL/);
+  assert.match(result.error, /NKFE_TOKEN_CONTRACT/);
+  assert.match(result.error, /NKFE_TREASURY_PRIVATE_KEY/);
+  assert.match(result.error, /NKFE_WITHDRAWAL_WEBHOOK_URL/);
 });
 
 test("sendWithdrawal posts to configured provider and returns transaction id", async () => {

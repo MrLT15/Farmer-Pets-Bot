@@ -39,6 +39,8 @@ Copy `.env.example` into your deployment environment and set the required values
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
 
+If `/fp-withdraw` says automatic withdrawals are not configured, the bot has neither a complete direct WAX setup nor a webhook fallback. For direct withdrawals, the commonly missing host secrets are `NKFE_TOKEN_CONTRACT` and `NKFE_TREASURY_PRIVATE_KEY` (with `WAX_RPC_URL` and `NKFE_PAYOUT_SOURCE_WALLET` also required, though they have defaults in `src/config.js`). Run `npm run doctor -- --skip-db` in the deployed environment to print exactly which withdrawal variables are missing.
+
 ## Discord permissions
 
 In the farm event channel, make sure the bot role has:

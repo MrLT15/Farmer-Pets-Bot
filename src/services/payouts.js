@@ -1,5 +1,31 @@
 const { createWaxTransferService } = require("./waxTransfers");
 
+const DIRECT_WITHDRAWAL_CONFIG = [
+  ["WAX_RPC_URL", "WAX_RPC_URL"],
+  ["NKFE_TOKEN_CONTRACT", "NKFE_TOKEN_CONTRACT"],
+  ["NKFE_PAYOUT_SOURCE_WALLET", "NKFE_PAYOUT_SOURCE_WALLET"],
+  ["NKFE_TREASURY_PRIVATE_KEY", "NKFE_TREASURY_PRIVATE_KEY"]
+];
+
+function getMissingDirectWithdrawalConfig(config = {}) {
+  return DIRECT_WITHDRAWAL_CONFIG
+    .filter(([, key]) => !config[key])
+    .map(([name]) => name);
+}
+
+function formatWithdrawalNotConfiguredError(config = {}) {
+  const missingDirectConfig = getMissingDirectWithdrawalConfig(config);
+  const directConfigHint = missingDirectConfig.length
+    ? ` For direct WAX withdrawals, set missing env var(s): ${missingDirectConfig.join(", ")}.`
+    : "";
+
+  return (
+    "Automatic $NKFE withdrawals are not configured yet." +
+    directConfigHint +
+    " Alternatively, set NKFE_WITHDRAWAL_WEBHOOK_URL to use an external payout provider."
+  );
+}
+
 function createPayoutService({
   config,
   fetchFn = globalThis.fetch,
@@ -46,7 +72,7 @@ function createPayoutService({
     if (!config.NKFE_WITHDRAWAL_WEBHOOK_URL) {
       return {
         ok: false,
-        error: "Automatic $NKFE withdrawals are not configured yet."
+        error: formatWithdrawalNotConfiguredError(config)
       };
     }
 
@@ -106,4 +132,8 @@ function createPayoutService({
   };
 }
 
-module.exports = { createPayoutService };
+module.exports = {
+  createPayoutService,
+  formatWithdrawalNotConfiguredError,
+  getMissingDirectWithdrawalConfig
+};

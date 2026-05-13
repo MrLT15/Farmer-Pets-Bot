@@ -15,7 +15,11 @@ const READY_CONFIG = {
   DATABASE_URL: "postgres://user:password@host/db",
   FARM_CHANNEL: "farm-channel",
   LEADERBOARD_CHANNEL: "leaderboard-channel",
-  FARMER_VERIFIED_ROLE: "verified-role"
+  FARMER_VERIFIED_ROLE: "verified-role",
+  WAX_RPC_URL: "https://wax.example",
+  NKFE_TOKEN_CONTRACT: "nkfe.token",
+  NKFE_PAYOUT_SOURCE_WALLET: "roadisledger",
+  NKFE_TREASURY_PRIVATE_KEY: "private-key"
 };
 
 function createPoolClass(results) {
@@ -124,7 +128,28 @@ test("runDoctor returns success when config and database checks pass", async () 
 
   assert.equal(exitCode, 0);
   assert.equal(logs.some(entry => entry.includes("✅ Required runtime config is present.")), true);
+  assert.equal(logs.some(entry => entry.includes("✅ Direct WAX withdrawals are configured.")), true);
   assert.equal(logs.some(entry => entry.includes("✅ Database connection and verified_wallets schema look ready.")), true);
+});
+
+test("runDoctor reports which withdrawal settings are missing without failing", async () => {
+  const { logger, logs } = createLogger();
+
+  const exitCode = await runDoctor({
+    runtimeConfig: {
+      ...READY_CONFIG,
+      NKFE_TOKEN_CONTRACT: "",
+      NKFE_TREASURY_PRIVATE_KEY: ""
+    },
+    logger,
+    skipDatabase: true
+  });
+
+  assert.equal(exitCode, 0);
+  const warning = logs.find(entry => entry[1]?.includes("Automatic $NKFE withdrawals are not configured"));
+  assert.match(warning[1], /NKFE_TOKEN_CONTRACT/);
+  assert.match(warning[1], /NKFE_TREASURY_PRIVATE_KEY/);
+  assert.match(warning[1], /NKFE_WITHDRAWAL_WEBHOOK_URL/);
 });
 
 test("runDoctor returns failure for missing config or failed database checks", async () => {

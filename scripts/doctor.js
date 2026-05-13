@@ -1,6 +1,7 @@
 const { Pool } = require("pg");
 
 const config = require("../src/config");
+const { getMissingDirectWithdrawalConfig } = require("../src/services/payouts");
 
 const REQUIRED_CONFIG = {
   DISCORD_TOKEN: "TOKEN",
@@ -96,6 +97,20 @@ async function runDoctor({
   logger.log(`ℹ️ Leaderboard channel: ${runtimeConfig.LEADERBOARD_CHANNEL || "not configured"}`);
   logger.log(`ℹ️ Verified role: ${runtimeConfig.FARMER_VERIFIED_ROLE || "not configured"}`);
   logger.log(`ℹ️ Event threads: ${runtimeConfig.ENABLE_EVENT_THREADS === false ? "disabled" : "enabled"}`);
+
+  const missingWithdrawalConfig = getMissingDirectWithdrawalConfig(runtimeConfig);
+  if (!missingWithdrawalConfig.length) {
+    logger.log("✅ Direct WAX withdrawals are configured.");
+  } else if (runtimeConfig.NKFE_WITHDRAWAL_WEBHOOK_URL) {
+    logger.log(
+      `✅ Withdrawal webhook fallback is configured. Direct WAX withdrawals are missing: ${missingWithdrawalConfig.join(", ")}.`
+    );
+  } else {
+    logger.log(
+      `⚠️ Automatic $NKFE withdrawals are not configured. Missing direct WAX env var(s): ${missingWithdrawalConfig.join(", ")}. ` +
+      "Set those or NKFE_WITHDRAWAL_WEBHOOK_URL."
+    );
+  }
 
   if (skipDatabase) {
     logger.log("⚠️ Database checks skipped by --skip-db.");
