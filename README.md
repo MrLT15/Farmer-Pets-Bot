@@ -95,11 +95,16 @@ Rescue success starts at **35%** and can increase from Discord roles, seasonal b
 
 Normal rescue events default to a 5-minute window and continue to spawn every 2–4 hours. When a normal rescue or Commander-started event begins, the bot also sends a direct message to verified non-bot members if `ENABLE_VERIFIED_MEMBER_DMS=true`.
 
-The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, and then resets weekly leaderboard stats. Rewards stay in the Farmer Pets bot database as withdrawable balances until players run `/fp-withdraw`; when direct WAX withdrawal variables are configured, the bot signs and pushes a transfer from `roadisledger` to the player's verified wallet and then deducts the in-bot balance.
+The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, and then resets weekly leaderboard stats. Rewards stay in the Farmer Pets bot database as withdrawable balances until players run `/fp-withdraw`; when `NKFE_PAYOUT_API_URL` is configured, the bot creates a pending withdrawal, debits the in-bot balance, calls the external payout API, and either marks the withdrawal completed with the transaction ID or refunds the balance on API failure.
 
 ## Health endpoint
 
 Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP server. `GET /health` returns uptime and active farm-event summary data, which is useful for deployment health checks. In Render, add an environment variable with key `HEALTH_PORT` and value `3000`; do not paste `HEALTH_PORT=3000` into the value field.
+
+
+## Troubleshooting Discord interactions
+
+If Render logs `DiscordAPIError[10062]: Unknown interaction` at `deferReply`, Discord has already invalidated that interaction token before the bot could acknowledge it. This is separate from the payout API itself. The bot now pre-acknowledges `/fp-withdraw` in the interaction router and logs a concise warning instead of retrying an invalid token. If it continues after deploys, check that only one Render service/worker is logged in with the bot token and ask users to retry the slash command after the new deploy is fully live.
 
 ## Deployment diagnostics
 

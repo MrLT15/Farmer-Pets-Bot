@@ -100,3 +100,53 @@ test("interaction errors reply or edit with a generic failure", async t => {
 
   assert.equal(deferredInteraction.editReplyPayloads.at(-1), "Something went wrong.");
 });
+
+test("fp-withdraw is acknowledged before dispatching withdrawal work", async () => {
+  const calls = [];
+  const interaction = createChatInteraction("fp-withdraw");
+  interaction.deferReply = async payload => {
+    interaction.deferred = true;
+    interaction.deferReplyPayload = payload;
+    calls.push(["defer", payload]);
+  };
+
+  const handler = createInteractionHandler({
+    commandHandlers: {
+      "fp-withdraw": async commandInteraction => calls.push(["handler", commandInteraction.deferred])
+    },
+    handleFarmHelp: async () => {},
+    handleRescue: async () => {}
+  });
+
+  await handler(interaction);
+
+  assert.deepEqual(calls, [
+    ["defer", { flags: FLAGS_EPHEMERAL }],
+    ["handler", true]
+  ]);
+});
+
+test("expired withdraw interactions are logged without retrying an invalid token", async t => {
+  const warnings = [];
+  t.mock.method(console, "warn", message => warnings.push(message));
+  const calls = [];
+  const interaction = createChatInteraction("fp-withdraw");
+  interaction.deferReply = async () => {
+    const error = new Error("Unknown interaction");
+    error.code = 10062;
+    throw error;
+  };
+
+  const handler = createInteractionHandler({
+    commandHandlers: {
+      "fp-withdraw": async () => calls.push("handler")
+    },
+    handleFarmHelp: async () => {},
+    handleRescue: async () => {}
+  });
+
+  await handler(interaction);
+
+  assert.deepEqual(calls, []);
+  assert.match(warnings.at(-1), /Could not acknowledge \/fp-withdraw/);
+});

@@ -16,6 +16,18 @@ function getDiscordPermissionHint(error) {
   return null;
 }
 
+function isUnknownInteractionError(error) {
+  return error?.code === 10062 || error?.rawError?.code === 10062;
+}
+
+function logUnknownInteractionWarning(logger, message = "Discord interaction expired before acknowledgement.") {
+  const log = logger.warn || logger.log || logger.error;
+  log.call(
+    logger,
+    `${message} This usually means Discord's 3-second acknowledgement window was missed, the command was retried from a stale client interaction, or another bot instance handled the same interaction first.`
+  );
+}
+
 function logDiscordPermissionWarning(logger, message, error) {
   const hint = getDiscordPermissionHint(error);
 
@@ -29,5 +41,7 @@ function logDiscordPermissionWarning(logger, message, error) {
 module.exports = {
   getDiscordPermissionHint,
   isDiscordPermissionError,
-  logDiscordPermissionWarning
+  isUnknownInteractionError,
+  logDiscordPermissionWarning,
+  logUnknownInteractionWarning
 };

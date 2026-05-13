@@ -113,7 +113,9 @@ async function handleRolesCommand(interaction, {
   getWallet,
   syncRoles
 }) {
-  await interaction.deferReply({ flags: flagsEphemeral });
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ flags: flagsEphemeral });
+  }
 
   const wallet = await getWallet(interaction.user.id);
 
@@ -287,7 +289,9 @@ async function handleWithdrawCommand(interaction, {
   payoutService,
   requestWithdrawal
 }) {
-  await interaction.deferReply({ flags: flagsEphemeral });
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ flags: flagsEphemeral });
+  }
 
   const wallet = await getWallet(interaction.user.id);
 
