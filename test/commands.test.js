@@ -300,7 +300,7 @@ test("fp-withdraw reports automatic payout failures without deducting", async ()
   assert.match(interaction.editReplyPayloads.at(-1), /not configured/);
 });
 
-test("fp-withdrawals lists pending withdrawal requests without pings", async () => {
+test("fp-withdrawals defers before listing pending withdrawal requests without pings", async () => {
   const handlers = createHandlers({
     getPendingWithdrawalRows: async () => [
       { id: 1, wallet: "abc.wam", amount_nkfe: 8, discord_id: "123" }
@@ -310,10 +310,25 @@ test("fp-withdrawals lists pending withdrawal requests without pings", async () 
 
   await handlers["fp-withdrawals"](interaction);
 
-  const payload = interaction.replyPayloads.at(-1);
-  assert.equal(payload.flags, FLAGS_EPHEMERAL);
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  const payload = interaction.editReplyPayloads.at(-1);
   assert.match(payload.content, /#1 — abc\.wam — \*\*8 \$NKFE\*\* — Discord ID 123/);
   assert.deepEqual(payload.allowedMentions, { parse: [], users: [], roles: [] });
+});
+
+test("fp-withdrawals defers before reporting no pending requests", async () => {
+  const handlers = createHandlers({
+    getPendingWithdrawalRows: async () => []
+  });
+  const interaction = createMockInteraction();
+
+  await handlers["fp-withdrawals"](interaction);
+
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(
+    interaction.editReplyPayloads.at(-1),
+    "No pending Farmer Pets $NKFE withdrawal requests."
+  );
 });
 
 

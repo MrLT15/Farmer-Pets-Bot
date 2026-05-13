@@ -331,13 +331,12 @@ async function handleWithdrawCommand(interaction, {
 }
 
 async function handleWithdrawalsCommand(interaction, { flagsEphemeral, getPendingWithdrawalRows }) {
+  await interaction.deferReply({ flags: flagsEphemeral });
+
   const rows = await getPendingWithdrawalRows();
 
   if (!rows.length) {
-    await interaction.reply({
-      content: "No pending Farmer Pets $NKFE withdrawal requests.",
-      flags: flagsEphemeral
-    });
+    await interaction.editReply("No pending Farmer Pets $NKFE withdrawal requests.");
     return;
   }
 
@@ -345,12 +344,11 @@ async function handleWithdrawalsCommand(interaction, { flagsEphemeral, getPendin
     `#${row.id} — ${row.wallet} — **${row.amount_nkfe} $NKFE** — Discord ID ${row.discord_id}`
   );
 
-  await interaction.reply({
+  await interaction.editReply({
     content:
       "🏦 **Pending Farmer Pets $NKFE Withdrawals**\n\n" +
       lines.join("\n") +
-      "\n\nProcess these from the treasury/withdrawal system; the bot has already locked these amounts out of player balances.",
-    flags: flagsEphemeral,
+      "\n\nThese are pending legacy/manual requests. New /fp-withdraw requests are sent automatically when the withdrawal provider is configured.",
     allowedMentions: { parse: [], users: [], roles: [] }
   });
 }
