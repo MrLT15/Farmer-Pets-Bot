@@ -7,12 +7,8 @@ const embedBuilders = require("./ui/embeds");
 const { getAssets } = require("./services/assets");
 const { analyzeUtilityAssets, getRewardBonus } = require("./services/utilityProfile");
 const { analyzeAssets, getSuccessChance, syncRoles } = require("./services/roles");
-const {
-  buildLeaderboardMessage,
-  buildStatsPayload,
-  handleDailyCheckIn,
-  postWeeklyLeaderboardAndReset
-} = require("./services/playerStats");
+const { createPlayerStatsService } = require("./services/playerStats");
+const { createPayoutService } = require("./services/payouts");
 const { commands } = require("./commands/definitions");
 const { createCommandHandlers } = require("./commands/handlers");
 const { createInteractionHandler } = require("./interactions");
@@ -58,12 +54,8 @@ function createBotApp({
   eventService = farmEvents,
   roleService = { analyzeAssets, getSuccessChance, syncRoles },
   utilityService = { analyzeUtilityAssets, getRewardBonus },
-  playerStatsService = {
-    buildLeaderboardMessage,
-    buildStatsPayload,
-    handleDailyCheckIn,
-    postWeeklyLeaderboardAndReset
-  },
+  payoutService,
+  playerStatsService,
   assetService = { getAssets },
   ui = { buildRescueButtonRow, embedBuilders },
   utils = { getEventAnnouncementTarget },
@@ -78,6 +70,9 @@ function createBotApp({
   processLike = process,
   logger = console
 } = {}) {
+  payoutService = payoutService || createPayoutService({ config, db, logger });
+  playerStatsService = playerStatsService || createPlayerStatsService({ config, db, payoutService });
+
   let activeFarmEvent = null;
   const healthServer = runtimes.createHealthServer({
     getActiveFarmEvent: () => activeFarmEvent,
@@ -107,6 +102,7 @@ function createBotApp({
     farmChannelId: config.FARM_CHANNEL,
     farmerVerifiedRoleId: config.FARMER_VERIFIED_ROLE,
     enableEventThreads: config.ENABLE_EVENT_THREADS,
+    enableVerifiedMemberDms: config.ENABLE_VERIFIED_MEMBER_DMS,
     awardCommunityEventPayouts: db.awardCommunityEventPayouts,
     awardCommunityMilestoneReward: db.awardCommunityMilestoneReward,
     buildRescueButtonRow: ui.buildRescueButtonRow,

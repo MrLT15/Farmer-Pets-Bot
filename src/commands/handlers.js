@@ -164,10 +164,11 @@ async function handleStatsCommand(interaction, { buildStatsPayload, flagsEphemer
 }
 
 async function handleLeaderboardCommand(interaction, { buildLeaderboardMessage }) {
-  const message = await buildLeaderboardMessage();
+  const message = await buildLeaderboardMessage({ mentionPlayers: false });
 
   await interaction.reply({
-    content: message
+    content: message,
+    allowedMentions: { parse: [], users: [], roles: [] }
   });
 }
 
@@ -249,7 +250,7 @@ async function handlePayoutsCommand(interaction, { flagsEphemeral, getPayoutRows
   }
 
   const lines = payoutRows.map(row =>
-    `${row.wallet} — **${row.payout_nkfe} $NKFE** — <@${row.discord_id}>`
+    `${row.wallet} — **${row.payout_nkfe} $NKFE** — Discord ID ${row.discord_id}`
   );
 
   await interaction.reply({

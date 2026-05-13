@@ -26,9 +26,13 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARMER_*_ROLE_ID` | Recommended | Role IDs used by `/fp-roles` and event pings. Defaults to Farmer Pets production roles. |
 | `HEALTH_PORT` or `PORT` | Optional | Starts a lightweight HTTP health endpoint at `/health` for web-service hosts. |
 | `ENABLE_EVENT_THREADS` | Optional | Defaults to `true`; set to `false` if the bot should skip per-event Discord thread creation. |
+| `ENABLE_VERIFIED_MEMBER_DMS` | Optional | Defaults to `true`; DMs verified non-bot members when a normal rescue or Commander event starts. |
 | `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `5`; controls how long normal rescue events stay open. |
 | `COMMUNITY_EVENT_DURATION_MINUTES` | Optional | Defaults to `10`; controls Commander-started community event duration. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
+| `NKFE_PAYOUT_SOURCE_WALLET` | Optional | WAX wallet used as the payout source. Defaults to `roadisledger`. |
+| `NKFE_TOKEN_CONTRACT`, `NKFE_TOKEN_SYMBOL` | Optional | Token contract/symbol metadata sent with automatic payout batches. Symbol defaults to `NKFE`; set the token contract before enabling automatic payouts. |
+| `NKFE_PAYOUT_WEBHOOK_URL`, `NKFE_PAYOUT_WEBHOOK_SECRET`, `NKFE_PAYOUT_MEMO` | Optional | If configured, the Sunday 5:00 PM Pacific job posts payout batches to your payout service and clears only successfully paid balances. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
 
@@ -63,7 +67,7 @@ General commands:
 - `/fp-rescue` — join the current rescue event.
 - `/fp-stats` — show your Farmer Pets stats.
 - `/fp-daily` — claim the daily check-in reward.
-- `/fp-leaderboard` — show the weekly leaderboard.
+- `/fp-leaderboard` — show the weekly leaderboard without pinging listed players.
 - `/fp-communityevent` — Commander NFT holders can start a 10-minute shared-pool community rescue when no event is active.
 
 Admin-only operational commands:
@@ -71,16 +75,18 @@ Admin-only operational commands:
 - `/fp-health` — show bot uptime, configured channels, health-port status, and active event name.
 - `/fp-eventstatus` — show active event timers, players, helpers, and co-op progress.
 - `/fp-cancelevent` — cancel and close the active event.
-- `/fp-postleaderboard` — manually post the weekly leaderboard and reset weekly stats.
-- `/fp-payouts` — show outstanding manual $NKFE payouts.
-- `/fp-resetpayouts` — reset payout balances after manual payment.
+- `/fp-postleaderboard` — manually run the Sunday-style leaderboard post, automatic payout batch, and weekly stat reset.
+- `/fp-payouts` — show outstanding $NKFE payout balances without pinging players.
+- `/fp-resetpayouts` — reset payout balances after an out-of-band manual payment.
 - `/fp-testevent` — start a test event when no event is active.
 
 ## Mini-game mechanics
 
 Rescue success starts at **35%** and can increase from Discord roles, seasonal bonuses, Security Forces NFTs, and Dog companions, but total chance is capped at **85%**. NDV and Parrot utility bonuses add $NKFE only on successful normal rescues. NPC holders receive one extra rescue attempt per active event. Commander NFT holders can start a 10-minute community rescue with a shared payout pool when no other farm event is active.
 
-Normal rescue events default to a 5-minute window and continue to spawn every 2–4 hours.
+Normal rescue events default to a 5-minute window and continue to spawn every 2–4 hours. When a normal rescue or Commander-started event begins, the bot also sends a direct message to verified non-bot members if `ENABLE_VERIFIED_MEMBER_DMS=true`.
+
+The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, submits any configured automatic payout batch from `roadisledger`, and then resets weekly leaderboard stats.
 
 ## Health endpoint
 

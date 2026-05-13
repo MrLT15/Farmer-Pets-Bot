@@ -49,7 +49,7 @@ function createHandlers(overrides = {}) {
       silver: 0,
       tool: 0
     }),
-    buildLeaderboardMessage: async () => "leaderboard",
+    buildLeaderboardMessage: async options => `leaderboard ${options?.mentionPlayers}`,
     buildStatsPayload: async () => ({ content: "stats" }),
     cancelActiveFarmEvent: async () => true,
     config: {
@@ -73,6 +73,19 @@ function createHandlers(overrides = {}) {
     ...overrides
   });
 }
+
+
+test("fp-leaderboard does not ping leaderboard players", async () => {
+  const handlers = createHandlers();
+  const interaction = createMockInteraction();
+
+  await handlers["fp-leaderboard"](interaction);
+
+  assert.deepEqual(interaction.replyPayloads.at(-1), {
+    content: "leaderboard false",
+    allowedMentions: { parse: [], users: [], roles: [] }
+  });
+});
 
 test("fp-roles prompts users without a verified wallet", async () => {
   let getAssetsCalled = false;
@@ -195,8 +208,8 @@ test("fp-payouts handles empty and populated payout lists", async () => {
 
   const payload = populatedInteraction.replyPayloads.at(-1);
   assert.equal(payload.flags, FLAGS_EPHEMERAL);
-  assert.match(payload.content, /wallet1 — \*\*7 \$NKFE\*\* — <@123>/);
-  assert.match(payload.content, /wallet2 — \*\*3 \$NKFE\*\* — <@456>/);
+  assert.match(payload.content, /wallet1 — \*\*7 \$NKFE\*\* — Discord ID 123/);
+  assert.match(payload.content, /wallet2 — \*\*3 \$NKFE\*\* — Discord ID 456/);
 });
 
 test("fp-resetpayouts resets balances and replies ephemerally", async () => {

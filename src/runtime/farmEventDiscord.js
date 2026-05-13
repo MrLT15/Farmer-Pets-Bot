@@ -6,6 +6,7 @@ function createFarmEventDiscordRuntime({
   farmChannelId,
   farmerVerifiedRoleId,
   enableEventThreads = true,
+  enableVerifiedMemberDms = true,
   awardCommunityEventPayouts = async () => 0,
   awardCommunityMilestoneReward,
   buildRescueButtonRow,
@@ -72,6 +73,38 @@ function createFarmEventDiscordRuntime({
       });
     } catch (error) {
       logger.error("Failed to update Farmer Pets event message:", error);
+    }
+  }
+
+  async function dmVerifiedMembers(farmEvent) {
+    if (!enableVerifiedMemberDms || !farmEvent.message?.guild) return 0;
+
+    try {
+      const guild = farmEvent.message.guild;
+      const members = await guild.members.fetch();
+      const verifiedMembers = [...members.values()].filter(member =>
+        !member.user?.bot && member.roles?.cache?.has(farmerVerifiedRoleId)
+      );
+      const message =
+        `🐾 A new Farmer Pets rescue is available: **${farmEvent.name}**. ` +
+        `Head to <#${farmChannelId}> to help before it expires!`;
+      let sentCount = 0;
+
+      for (const member of verifiedMembers) {
+        try {
+          await member.send(message);
+          sentCount += 1;
+        } catch (error) {
+          warnDiscordPermission(`Could not DM verified Farmer Pets member ${member.id}.`, error);
+        }
+      }
+
+      return sentCount;
+    } catch (error) {
+      if (!warnDiscordPermission("Could not fetch verified Farmer Pets members for event DMs.", error)) {
+        logger.error("Failed to DM verified Farmer Pets members:", error);
+      }
+      return 0;
     }
   }
 
@@ -175,6 +208,8 @@ function createFarmEventDiscordRuntime({
         components: [buildRescueButtonRow()]
       });
       farmEvent.thread = await createEventThread(farmEvent.message, farmEvent);
+      dmVerifiedMembers(farmEvent)
+        .catch(error => logger.error("Failed to send Farmer Pets event DMs:", error));
 
       if (farmEvent.thread?.isTextBased()) {
         try {
@@ -219,6 +254,7 @@ function createFarmEventDiscordRuntime({
     announceCommunityGoalReached,
     closeFarmEventMessage,
     createEventThread,
+    dmVerifiedMembers,
     endFarmEvent,
     scheduleEvent,
     startCommunityFarmEvent,

@@ -196,10 +196,11 @@ test("buildLeaderboardMessage formats empty and populated leaderboards", async (
     }
   });
 
-  assert.match(await populated.service.buildLeaderboardMessage(), /1\. <@123> — \*\*12 \$NKFE\*\*/);
+  assert.match(await populated.service.buildLeaderboardMessage(), /1\. Discord ID 123 — \*\*12 \$NKFE\*\*/);
+  assert.match(await populated.service.buildLeaderboardMessage({ mentionPlayers: true }), /1\. <@123> — \*\*12 \$NKFE\*\*/);
 });
 
-test("postWeeklyLeaderboardAndReset posts payout total and resets weekly stats", async () => {
+test("postWeeklyLeaderboardAndReset posts tagged weekly leaderboard, payout status, and resets weekly stats", async () => {
   const sentMessages = [];
   const { calls, service } = createService({
     db: {
@@ -208,7 +209,14 @@ test("postWeeklyLeaderboardAndReset posts payout total and resets weekly stats",
         { payout_nkfe: "6" },
         { payout_nkfe: null }
       ],
-      getWeeklyLeaderboardRows: async () => []
+      getWeeklyLeaderboardRows: async () => [{
+        discord_id: "123",
+        wallet: "wallet.wam",
+        weekly_nkfe: 10,
+        weekly_successes: 2,
+        weekly_attempts: 3,
+        lifetime_nkfe: 20
+      }]
     }
   });
   const client = {
@@ -224,6 +232,9 @@ test("postWeeklyLeaderboardAndReset posts payout total and resets weekly stats",
   await service.postWeeklyLeaderboardAndReset(client);
 
   assert.deepEqual(client.channels.fetchCalls, ["leaderboard-channel"]);
-  assert.match(sentMessages.at(-1), /Total Farmer Pets NKFE Owed:\*\* 10 \$NKFE/);
+  assert.match(sentMessages.at(-1).content, /<@123> — \*\*10 \$NKFE\*/);
+  assert.match(sentMessages.at(-1).content, /Total Farmer Pets NKFE Earned This Week:\*\* 10 \$NKFE/);
+  assert.match(sentMessages.at(-1).content, /Automatic \$NKFE payout service is not configured/);
+  assert.deepEqual(sentMessages.at(-1).allowedMentions, { users: ["123"], roles: [], parse: [] });
   assert.deepEqual(calls, [["resetWeeklyStats"]]);
 });

@@ -35,6 +35,7 @@ test("createDatabase exposes the database helper surface", () => {
   assert.deepEqual(Object.keys(db).sort(), [
     "awardCommunityEventPayouts",
     "awardCommunityMilestoneReward",
+    "clearPayoutsForDiscordIds",
     "close",
     "ensurePlayer",
     "getDailyCheckInState",
@@ -154,4 +155,22 @@ test("recordDailyCheckIn persists rewards and returns streak totals", async () =
   assert.deepEqual(updated, { daily_streak: 7, best_daily_streak: 9 });
   assert.match(normalizeSql(pool.calls[0].sql), /last_daily_checkin = \$4::date/);
   assert.deepEqual(pool.calls[0].params, ["discord-1", 8, 7, "2026-05-09"]);
+});
+
+
+test("clearPayoutsForDiscordIds resets only paid payout balances", async () => {
+  const pool = createMockPool([{ rows: [], rowCount: 2 }]);
+  const db = createDatabase(pool);
+
+  assert.equal(await db.clearPayoutsForDiscordIds(["discord-1", "discord-2"]), 2);
+  assert.match(normalizeSql(pool.calls[0].sql), /WHERE discord_id = ANY\(\$1::text\[\]\)/);
+  assert.deepEqual(pool.calls[0].params, [["discord-1", "discord-2"]]);
+});
+
+test("clearPayoutsForDiscordIds skips empty paid id lists", async () => {
+  const pool = createMockPool();
+  const db = createDatabase(pool);
+
+  assert.equal(await db.clearPayoutsForDiscordIds([]), 0);
+  assert.deepEqual(pool.calls, []);
 });

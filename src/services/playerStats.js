@@ -9,7 +9,8 @@ function createPlayerStatsService({
   db = defaultDb,
   dates = defaultDates,
   rewards = defaultRewards,
-  embedBuilders = defaultEmbedBuilders
+  embedBuilders = defaultEmbedBuilders,
+  payoutService = null
 } = {}) {
   async function handleDailyCheckIn(interaction) {
     const wallet = await db.getWallet(interaction.user.id);
@@ -79,16 +80,14 @@ function createPlayerStatsService({
     return { embeds: [embedBuilders.buildStatsEmbed({ displayName, row, wallet })] };
   }
 
-  async function buildLeaderboardMessage() {
-    const rows = await db.getWeeklyLeaderboardRows();
-
+  function formatLeaderboardRows(rows, { mentionPlayers = false } = {}) {
     if (!rows.length) {
       return "🏆 **Farmer Pets Weekly Leaderboard**\n\nNo Farmer Pets rescue activity this week.";
     }
 
     const lines = rows.map((row, index) => {
       return (
-        `${index + 1}. <@${row.discord_id}> — ` +
+        `${index + 1}. ${mentionPlayers ? `<@${row.discord_id}>` : `Discord ID ${row.discord_id}`} — ` +
         `**${row.weekly_nkfe} $NKFE** | ` +
         `${row.weekly_successes}/${row.weekly_attempts} successful | ` +
         `Lifetime: ${row.lifetime_nkfe} $NKFE | Wallet: **${row.wallet}**`
@@ -98,22 +97,36 @@ function createPlayerStatsService({
     return "🏆 **Farmer Pets Weekly Leaderboard**\n\n" + lines.join("\n");
   }
 
+  async function buildLeaderboardMessage(options = {}) {
+    return formatLeaderboardRows(await db.getWeeklyLeaderboardRows(), options);
+  }
+
   async function postWeeklyLeaderboardAndReset(client) {
     const channel = await client.channels.fetch(config.LEADERBOARD_CHANNEL);
-    const leaderboard = await buildLeaderboardMessage();
+    const rows = await db.getWeeklyLeaderboardRows();
+    const leaderboard = formatLeaderboardRows(rows, { mentionPlayers: true });
 
     const payoutRows = await db.getPayoutRows();
 
-    const totalPayout = payoutRows.reduce(
-      (sum, row) => sum + Number(row.payout_nkfe || 0),
+    const weeklyEarned = rows.reduce(
+      (sum, row) => sum + Number(row.weekly_nkfe || 0),
       0
     );
 
-    await channel.send(
-      `${leaderboard}\n\n` +
-      `💰 **Total Farmer Pets NKFE Owed:** ${totalPayout} $NKFE\n\n` +
-      `Use **/fp-payouts** for the manual payout list.`
-    );
+    let payoutSummary = "Automatic $NKFE payout service is not configured.";
+
+    if (payoutService) {
+      const payoutResult = await payoutService.sendAutomaticWeeklyPayouts(payoutRows);
+      payoutSummary = payoutService.formatAutomaticPayoutSummary(payoutResult);
+    }
+
+    await channel.send({
+      content:
+        `${leaderboard}\n\n` +
+        `💰 **Total Farmer Pets NKFE Earned This Week:** ${weeklyEarned} $NKFE\n` +
+        `${payoutSummary}`,
+      allowedMentions: { users: rows.map(row => row.discord_id), roles: [], parse: [] }
+    });
 
     await db.resetWeeklyStats();
   }

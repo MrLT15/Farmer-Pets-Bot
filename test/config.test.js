@@ -68,6 +68,10 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.ATOMIC_API, "https://wax.api.atomicassets.io/atomicassets/v1/assets");
     assert.equal(config.FARMER_PETS_API, "https://pets-api-main.herokuapp.com");
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
+    assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "roadisledger");
+    assert.equal(config.NKFE_TOKEN_CONTRACT, "");
+    assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, true);
     assert.equal(config.HEALTH_PORT, undefined);
     assert.equal(config.ENABLE_EVENT_THREADS, true);
     assert.equal(config.FARM_EVENT_DURATION_MINUTES, 5);
@@ -91,8 +95,15 @@ test("config allows deployment environment to override channel, role, and API va
     ATOMIC_API: "https://atomic.example.test/assets",
     FARMER_PETS_API: "https://pets.example.test",
     CONTRACT_ACCOUNT: "contractacct",
+    NKFE_PAYOUT_SOURCE_WALLET: "sourcewallet",
+    NKFE_TOKEN_CONTRACT: "nkfe.token",
+    NKFE_TOKEN_SYMBOL: "NKFE",
+    NKFE_PAYOUT_WEBHOOK_URL: "https://payout.example",
+    NKFE_PAYOUT_WEBHOOK_SECRET: "secret",
+    NKFE_PAYOUT_MEMO: "memo",
     HEALTH_PORT: "8080",
     ENABLE_EVENT_THREADS: "false",
+    ENABLE_VERIFIED_MEMBER_DMS: "false",
     FARM_EVENT_DURATION_MINUTES: "45",
     COMMUNITY_EVENT_DURATION_MINUTES: "12"
   }, config => {
@@ -108,8 +119,15 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.ATOMIC_API, "https://atomic.example.test/assets");
     assert.equal(config.FARMER_PETS_API, "https://pets.example.test");
     assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
+    assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "sourcewallet");
+    assert.equal(config.NKFE_TOKEN_CONTRACT, "nkfe.token");
+    assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_PAYOUT_WEBHOOK_URL, "https://payout.example");
+    assert.equal(config.NKFE_PAYOUT_WEBHOOK_SECRET, "secret");
+    assert.equal(config.NKFE_PAYOUT_MEMO, "memo");
     assert.equal(config.HEALTH_PORT, "8080");
     assert.equal(config.ENABLE_EVENT_THREADS, false);
+    assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, false);
     assert.equal(config.FARM_EVENT_DURATION_MINUTES, 45);
     assert.equal(config.FARM_EVENT_DURATION_MS, 45 * 60 * 1000);
     assert.equal(config.COMMUNITY_EVENT_DURATION_MINUTES, 12);

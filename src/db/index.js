@@ -311,10 +311,27 @@ function createDatabase(dbPool, { logger = console } = {}) {
     `);
   }
 
+  async function clearPayoutsForDiscordIds(discordIds) {
+    if (!discordIds.length) return 0;
+
+    const res = await dbPool.query(
+      `
+      UPDATE farmerpets_balances
+      SET payout_nkfe = 0,
+          updated_at = NOW()
+      WHERE discord_id = ANY($1::text[]);
+      `,
+      [discordIds]
+    );
+
+    return res.rowCount;
+  }
+
 
   return {
     awardCommunityEventPayouts,
     awardCommunityMilestoneReward,
+    clearPayoutsForDiscordIds,
     close,
     ensurePlayer,
     getDailyCheckInState,

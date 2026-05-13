@@ -135,3 +135,57 @@ test("community announcements swallow Discord permission failures with warnings"
   assert.match(warnings[0][0], /community goal/);
   assert.match(warnings[0][0], /Missing Permissions/);
 });
+
+
+test("dmVerifiedMembers sends event alerts only to verified non-bot members", async () => {
+  const sent = [];
+  const members = new Map([
+    ["verified", {
+      id: "verified",
+      user: { bot: false },
+      roles: { cache: { has: roleId => roleId === "verified-role" } },
+      send: async message => sent.push(["verified", message])
+    }],
+    ["unverified", {
+      id: "unverified",
+      user: { bot: false },
+      roles: { cache: { has: () => false } },
+      send: async message => sent.push(["unverified", message])
+    }],
+    ["bot", {
+      id: "bot",
+      user: { bot: true },
+      roles: { cache: { has: () => true } },
+      send: async message => sent.push(["bot", message])
+    }]
+  ]);
+  const { farmEvent, runtime } = createRuntime();
+
+  farmEvent.name = "Commander Rescue";
+  farmEvent.message = {
+    guild: {
+      members: {
+        fetch: async () => members
+      }
+    }
+  };
+
+  assert.equal(await runtime.dmVerifiedMembers(farmEvent), 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], "verified");
+  assert.match(sent[0][1], /Commander Rescue/);
+  assert.match(sent[0][1], /<#farm-channel>/);
+});
+
+test("dmVerifiedMembers respects the event DM feature flag", async () => {
+  const { farmEvent, runtime } = createRuntime({ enableVerifiedMemberDms: false });
+  farmEvent.message = {
+    guild: {
+      members: {
+        fetch: async () => assert.fail("should not fetch members")
+      }
+    }
+  };
+
+  assert.equal(await runtime.dmVerifiedMembers(farmEvent), 0);
+});
