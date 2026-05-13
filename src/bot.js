@@ -203,6 +203,7 @@ function createBotApp({
       getRemainingEventMs: eventService.getRemainingEventMs,
       handleDailyCheckIn: playerStatsService.handleDailyCheckIn,
       handleRescue,
+      payoutService,
       postWeeklyLeaderboardAndReset: () => playerStatsService.postWeeklyLeaderboardAndReset(client),
       requestWithdrawal: db.requestWithdrawal,
       resetPayouts: db.resetPayouts,

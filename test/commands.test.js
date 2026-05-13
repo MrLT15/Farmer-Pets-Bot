@@ -70,6 +70,9 @@ function createHandlers(overrides = {}) {
     getRemainingEventMs: () => 125000,
     handleDailyCheckIn: async interaction => interaction.reply({ content: "daily" }),
     handleRescue: async interaction => interaction.reply({ content: "rescue" }),
+    payoutService: {
+      sendWithdrawal: async () => ({ ok: true, transactionId: "tx-default" })
+    },
     postWeeklyLeaderboardAndReset: async () => {},
     requestWithdrawal: async () => ({ ok: false, available: 0 }),
     resetPayouts: async () => {},
@@ -220,18 +223,26 @@ test("fp-payouts handles empty and populated payout lists", async () => {
 
 
 
-test("fp-withdraw creates a player-owned withdrawal request from bot balance", async () => {
+test("fp-withdraw sends NKFE to the verified wallet through payout service", async () => {
   const calls = [];
   const handlers = createHandlers({
     getPlayerBalance: async discordId => {
       calls.push(["balance", discordId]);
       return { payout_nkfe: 10 };
     },
-    requestWithdrawal: async (discordId, wallet, amount) => {
+    payoutService: {
+      sendWithdrawal: async payload => {
+        calls.push(["payout", payload]);
+        return { ok: true, transactionId: "tx123" };
+      }
+    },
+    requestWithdrawal: async (discordId, wallet, amount, sendWithdrawal) => {
       calls.push(["withdraw", discordId, wallet, amount]);
+      const payout = await sendWithdrawal({ discordId, wallet, amount });
       return {
         ok: true,
         remaining: 6,
+        transactionId: payout.transactionId,
         withdrawal: { id: 42, amount_nkfe: 4 }
       };
     }
@@ -243,10 +254,12 @@ test("fp-withdraw creates a player-owned withdrawal request from bot balance", a
   assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
   assert.deepEqual(calls, [
     ["balance", "discord-user"],
-    ["withdraw", "discord-user", "wallet.wam", 4]
+    ["withdraw", "discord-user", "wallet.wam", 4],
+    ["payout", { discordId: "discord-user", wallet: "wallet.wam", amount: 4 }]
   ]);
-  assert.match(interaction.editReplyPayloads.at(-1), /Withdrawal request \*\*#42\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Sent \*\*4 \$NKFE\*\* to wallet \*\*wallet\.wam\*\*/);
   assert.match(interaction.editReplyPayloads.at(-1), /Remaining bot balance: \*\*6 \$NKFE\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Transaction: \*\*tx123\*\*/);
 });
 
 test("fp-withdraw rejects missing wallets and over-balance amounts", async () => {
@@ -265,6 +278,26 @@ test("fp-withdraw rejects missing wallets and over-balance amounts", async () =>
   await overBalanceHandlers["fp-withdraw"](overBalanceInteraction);
 
   assert.equal(overBalanceInteraction.editReplyPayloads.at(-1), "You only have **3 $NKFE** available to withdraw.");
+});
+
+
+
+test("fp-withdraw reports automatic payout failures without deducting", async () => {
+  const handlers = createHandlers({
+    getPlayerBalance: async () => ({ payout_nkfe: 5 }),
+    requestWithdrawal: async () => ({
+      ok: false,
+      available: 5,
+      requested: 3,
+      error: "Automatic $NKFE withdrawals are not configured yet."
+    })
+  });
+  const interaction = createMockInteraction({ amount: 3 });
+
+  await handlers["fp-withdraw"](interaction);
+
+  assert.match(interaction.editReplyPayloads.at(-1), /Automatic withdrawal could not be completed/);
+  assert.match(interaction.editReplyPayloads.at(-1), /not configured/);
 });
 
 test("fp-withdrawals lists pending withdrawal requests without pings", async () => {

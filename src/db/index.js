@@ -54,8 +54,14 @@ function createDatabase(dbPool, { logger = console } = {}) {
         amount_nkfe INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         requested_at TIMESTAMPTZ DEFAULT NOW(),
-        processed_at TIMESTAMPTZ
+        processed_at TIMESTAMPTZ,
+        transaction_id TEXT
       );
+    `);
+
+    await dbPool.query(`
+      ALTER TABLE farmerpets_withdrawals
+        ADD COLUMN IF NOT EXISTS transaction_id TEXT;
     `);
 
     await dbPool.query(`
@@ -296,7 +302,7 @@ function createDatabase(dbPool, { logger = console } = {}) {
     return res.rows[0] || null;
   }
 
-  async function requestWithdrawal(discordId, wallet, amount) {
+  async function requestWithdrawal(discordId, wallet, amount, sendWithdrawal) {
     await dbPool.query("BEGIN");
 
     try {
@@ -317,6 +323,32 @@ function createDatabase(dbPool, { logger = console } = {}) {
         return { ok: false, available, requested };
       }
 
+      if (typeof sendWithdrawal !== "function") {
+        await dbPool.query("ROLLBACK");
+        return {
+          ok: false,
+          available,
+          requested,
+          error: "Automatic $NKFE withdrawals are not configured yet."
+        };
+      }
+
+      const payoutResult = await sendWithdrawal({
+        discordId,
+        wallet,
+        amount: requested
+      });
+
+      if (!payoutResult?.ok) {
+        await dbPool.query("ROLLBACK");
+        return {
+          ok: false,
+          available,
+          requested,
+          error: payoutResult?.error || "Automatic $NKFE withdrawal failed."
+        };
+      }
+
       await dbPool.query(
         `
         UPDATE farmerpets_balances
@@ -329,15 +361,22 @@ function createDatabase(dbPool, { logger = console } = {}) {
 
       const withdrawalRes = await dbPool.query(
         `
-        INSERT INTO farmerpets_withdrawals (discord_id, wallet, amount_nkfe)
-        VALUES ($1, $2, $3)
-        RETURNING id, discord_id, wallet, amount_nkfe, status, requested_at;
+        INSERT INTO farmerpets_withdrawals (
+          discord_id, wallet, amount_nkfe, status, processed_at, transaction_id
+        )
+        VALUES ($1, $2, $3, 'completed', NOW(), $4)
+        RETURNING id, discord_id, wallet, amount_nkfe, status, requested_at, processed_at, transaction_id;
         `,
-        [discordId, wallet, requested]
+        [discordId, wallet, requested, payoutResult.transactionId || null]
       );
 
       await dbPool.query("COMMIT");
-      return { ok: true, withdrawal: withdrawalRes.rows[0], remaining: available - requested };
+      return {
+        ok: true,
+        withdrawal: withdrawalRes.rows[0],
+        remaining: available - requested,
+        transactionId: payoutResult.transactionId || null
+      };
     } catch (error) {
       await dbPool.query("ROLLBACK");
       throw error;

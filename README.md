@@ -30,8 +30,9 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `5`; controls how long normal rescue events stay open. |
 | `COMMUNITY_EVENT_DURATION_MINUTES` | Optional | Defaults to `10`; controls Commander-started community event duration. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
-| `NKFE_PAYOUT_SOURCE_WALLET` | Optional | Treasury/source wallet label shown for withdrawals. Defaults to `roadisledger`; the bot does **not** auto-send tokens from it. |
-| `NKFE_TOKEN_SYMBOL` | Optional | Token symbol shown in ledger/withdrawal messages. Defaults to `NKFE`. |
+| `NKFE_PAYOUT_SOURCE_WALLET` | Optional | Treasury/source wallet label included in withdrawal provider calls. Defaults to `roadisledger`. |
+| `NKFE_TOKEN_SYMBOL` | Optional | Token symbol shown in ledger/withdrawal messages and sent to the withdrawal provider. Defaults to `NKFE`. |
+| `NKFE_WITHDRAWAL_WEBHOOK_URL`, `NKFE_WITHDRAWAL_WEBHOOK_SECRET`, `NKFE_WITHDRAWAL_MEMO` | Required for self-service withdrawals | Provider endpoint/secret/memo used by `/fp-withdraw` to send $NKFE from the treasury wallet to the player's verified wallet. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
 
@@ -68,7 +69,7 @@ General commands:
 - `/fp-daily` — claim the daily check-in reward.
 - `/fp-leaderboard` — show the weekly leaderboard without pinging listed players.
 - `/fp-communityevent` — Commander NFT holders can start a 10-minute shared-pool community rescue when no event is active.
-- `/fp-withdraw` — request a withdrawal from your Farmer Pets $NKFE bot balance. Leave `amount` blank to withdraw the full available balance.
+- `/fp-withdraw` — withdraw from your Farmer Pets $NKFE bot balance to your verified wallet. Leave `amount` blank to withdraw the full available balance.
 
 Admin-only operational commands:
 
@@ -77,7 +78,7 @@ Admin-only operational commands:
 - `/fp-cancelevent` — cancel and close the active event.
 - `/fp-postleaderboard` — manually run the Sunday-style leaderboard post and weekly stat reset.
 - `/fp-payouts` — show outstanding in-bot $NKFE balances without pinging players.
-- `/fp-withdrawals` — show pending player-created $NKFE withdrawal requests.
+- `/fp-withdrawals` — show pending legacy/manual $NKFE withdrawal requests, if any.
 - `/fp-resetpayouts` — reset payout balances after an out-of-band manual payment.
 - `/fp-testevent` — start a test event when no event is active.
 
@@ -87,7 +88,7 @@ Rescue success starts at **35%** and can increase from Discord roles, seasonal b
 
 Normal rescue events default to a 5-minute window and continue to spawn every 2–4 hours. When a normal rescue or Commander-started event begins, the bot also sends a direct message to verified non-bot members if `ENABLE_VERIFIED_MEMBER_DMS=true`.
 
-The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, and then resets weekly leaderboard stats. Rewards stay in the Farmer Pets bot database as withdrawable balances; players create their own withdrawal requests with `/fp-withdraw`, and admins can review pending requests with `/fp-withdrawals`. The bot does **not** send individual wallet payouts automatically.
+The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, and then resets weekly leaderboard stats. Rewards stay in the Farmer Pets bot database as withdrawable balances until players run `/fp-withdraw`; when `NKFE_WITHDRAWAL_WEBHOOK_URL` is configured, the bot calls that provider to send $NKFE from `roadisledger` to the player's verified wallet and then deducts the in-bot balance.
 
 ## Health endpoint
 

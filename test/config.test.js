@@ -26,6 +26,9 @@ const ENV_NAMES = [
   "CONTRACT_ACCOUNT",
   "NKFE_PAYOUT_SOURCE_WALLET",
   "NKFE_TOKEN_SYMBOL",
+  "NKFE_WITHDRAWAL_WEBHOOK_URL",
+  "NKFE_WITHDRAWAL_WEBHOOK_SECRET",
+  "NKFE_WITHDRAWAL_MEMO",
   "ENABLE_VERIFIED_MEMBER_DMS",
   "HEALTH_PORT",
   "PORT",
@@ -73,6 +76,9 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
     assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "roadisledger");
     assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "");
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "");
+    assert.equal(config.NKFE_WITHDRAWAL_MEMO, "Farmer Pets $NKFE withdrawal");
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, true);
     assert.equal(config.HEALTH_PORT, undefined);
     assert.equal(config.ENABLE_EVENT_THREADS, true);
@@ -99,6 +105,9 @@ test("config allows deployment environment to override channel, role, and API va
     CONTRACT_ACCOUNT: "contractacct",
     NKFE_PAYOUT_SOURCE_WALLET: "sourcewallet",
     NKFE_TOKEN_SYMBOL: "NKFE",
+    NKFE_WITHDRAWAL_WEBHOOK_URL: "https://withdraw.example",
+    NKFE_WITHDRAWAL_WEBHOOK_SECRET: "secret",
+    NKFE_WITHDRAWAL_MEMO: "memo",
     HEALTH_PORT: "8080",
     ENABLE_EVENT_THREADS: "false",
     ENABLE_VERIFIED_MEMBER_DMS: "false",
@@ -119,6 +128,9 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
     assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "sourcewallet");
     assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "https://withdraw.example");
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "secret");
+    assert.equal(config.NKFE_WITHDRAWAL_MEMO, "memo");
     assert.equal(config.HEALTH_PORT, "8080");
     assert.equal(config.ENABLE_EVENT_THREADS, false);
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, false);

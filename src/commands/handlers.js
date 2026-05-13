@@ -19,6 +19,7 @@ function createCommandHandlers({
   getRemainingEventMs = farmEvent => Math.max((farmEvent?.expires || Date.now()) - Date.now(), 0),
   handleDailyCheckIn,
   handleRescue,
+  payoutService = null,
   postWeeklyLeaderboardAndReset,
   requestWithdrawal,
   resetPayouts,
@@ -63,6 +64,7 @@ function createCommandHandlers({
       flagsEphemeral,
       getPlayerBalance,
       getWallet,
+      payoutService,
       requestWithdrawal
     }),
     "fp-resetpayouts": interaction => handleResetPayoutsCommand(interaction, {
@@ -280,6 +282,7 @@ async function handleWithdrawCommand(interaction, {
   flagsEphemeral,
   getPlayerBalance,
   getWallet,
+  payoutService,
   requestWithdrawal
 }) {
   await interaction.deferReply({ flags: flagsEphemeral });
@@ -306,16 +309,24 @@ async function handleWithdrawCommand(interaction, {
     return;
   }
 
-  const result = await requestWithdrawal(interaction.user.id, wallet, requestedAmount);
+  const result = await requestWithdrawal(
+    interaction.user.id,
+    wallet,
+    requestedAmount,
+    payoutService ? payload => payoutService.sendWithdrawal(payload) : undefined
+  );
 
   if (!result.ok) {
-    await interaction.editReply(`Withdrawal request could not be created. Available balance: **${result.available || 0} $NKFE**.`);
+    await interaction.editReply(
+      `Automatic withdrawal could not be completed. ${result.error || `Available balance: **${result.available || 0} $NKFE**.`}`
+    );
     return;
   }
 
   await interaction.editReply(
-    `✅ Withdrawal request **#${result.withdrawal.id}** created for **${result.withdrawal.amount_nkfe} $NKFE** to wallet **${wallet}**. ` +
-    `Remaining bot balance: **${result.remaining} $NKFE**.`
+    `✅ Sent **${result.withdrawal.amount_nkfe} $NKFE** to wallet **${wallet}**. ` +
+    `Remaining bot balance: **${result.remaining} $NKFE**.` +
+    `${result.transactionId ? ` Transaction: **${result.transactionId}**.` : ""}`
   );
 }
 
