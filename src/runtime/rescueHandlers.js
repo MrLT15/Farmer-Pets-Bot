@@ -113,7 +113,7 @@ function createRescueHandlers({
         ])
       };
     } catch (error) {
-      logger.error("Failed to build Farmer Pets rescue NFT profile:", error);
+      logger.warn?.(`Farmer Pets rescue NFT profile scan skipped: ${error.message}`);
       return {};
     }
   }

@@ -1,6 +1,18 @@
+const { createWaxTransferService } = require("./waxTransfers");
+
 function createPayoutService({
   config,
-  fetchFn = globalThis.fetch
+  fetchFn = globalThis.fetch,
+  waxTransferService = createWaxTransferService({
+    rpcUrl: config.WAX_RPC_URL,
+    tokenContract: config.NKFE_TOKEN_CONTRACT,
+    tokenSymbol: config.NKFE_TOKEN_SYMBOL,
+    tokenPrecision: config.NKFE_TOKEN_PRECISION,
+    sourceWallet: config.NKFE_PAYOUT_SOURCE_WALLET,
+    privateKey: config.NKFE_TREASURY_PRIVATE_KEY,
+    memo: config.NKFE_WITHDRAWAL_MEMO,
+    fetchFn
+  })
 }) {
   function formatWeeklyLedgerSummary({ payoutRows = [] } = {}) {
     const totalAvailable = payoutRows.reduce(
@@ -19,11 +31,19 @@ function createPayoutService({
   }
 
   function isWithdrawalConfigured() {
-    return Boolean(config.NKFE_WITHDRAWAL_WEBHOOK_URL);
+    return Boolean(waxTransferService?.isConfigured?.() || config.NKFE_WITHDRAWAL_WEBHOOK_URL);
   }
 
   async function sendWithdrawal({ discordId, wallet, amount }) {
-    if (!isWithdrawalConfigured()) {
+    if (waxTransferService?.isConfigured?.()) {
+      try {
+        return await waxTransferService.transfer({ to: wallet, amount });
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    }
+
+    if (!config.NKFE_WITHDRAWAL_WEBHOOK_URL) {
       return {
         ok: false,
         error: "Automatic $NKFE withdrawals are not configured yet."

@@ -30,9 +30,12 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `5`; controls how long normal rescue events stay open. |
 | `COMMUNITY_EVENT_DURATION_MINUTES` | Optional | Defaults to `10`; controls Commander-started community event duration. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
-| `NKFE_PAYOUT_SOURCE_WALLET` | Optional | Treasury/source wallet label included in withdrawal provider calls. Defaults to `roadisledger`. |
-| `NKFE_TOKEN_SYMBOL` | Optional | Token symbol shown in ledger/withdrawal messages and sent to the withdrawal provider. Defaults to `NKFE`. |
-| `NKFE_WITHDRAWAL_WEBHOOK_URL`, `NKFE_WITHDRAWAL_WEBHOOK_SECRET`, `NKFE_WITHDRAWAL_MEMO` | Required for self-service withdrawals | Provider endpoint/secret/memo used by `/fp-withdraw` to send $NKFE from the treasury wallet to the player's verified wallet. |
+| `WAX_RPC_URL` | Required for direct withdrawals | WAX RPC endpoint used to push token transfers. Defaults to `https://wax.greymass.com`. |
+| `NKFE_PAYOUT_SOURCE_WALLET` | Required for direct withdrawals | Treasury/source wallet that sends withdrawals. Defaults to `roadisledger`. |
+| `NKFE_TREASURY_PRIVATE_KEY` | Required for direct withdrawals | Active private key for the treasury/source wallet. Store only as a private host secret. |
+| `NKFE_TOKEN_CONTRACT`, `NKFE_TOKEN_SYMBOL`, `NKFE_TOKEN_PRECISION` | Required for direct withdrawals | Token contract and asset formatting used for $NKFE transfers. Symbol defaults to `NKFE`; precision defaults to `4`. |
+| `NKFE_WITHDRAWAL_MEMO` | Optional | Memo included on direct WAX withdrawal transfers. |
+| `NKFE_WITHDRAWAL_WEBHOOK_URL`, `NKFE_WITHDRAWAL_WEBHOOK_SECRET` | Optional fallback | External payout provider endpoint/secret if you do not want the bot to sign WAX transfers directly. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
 
@@ -88,7 +91,7 @@ Rescue success starts at **35%** and can increase from Discord roles, seasonal b
 
 Normal rescue events default to a 5-minute window and continue to spawn every 2–4 hours. When a normal rescue or Commander-started event begins, the bot also sends a direct message to verified non-bot members if `ENABLE_VERIFIED_MEMBER_DMS=true`.
 
-The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, and then resets weekly leaderboard stats. Rewards stay in the Farmer Pets bot database as withdrawable balances until players run `/fp-withdraw`; when `NKFE_WITHDRAWAL_WEBHOOK_URL` is configured, the bot calls that provider to send $NKFE from `roadisledger` to the player's verified wallet and then deducts the in-bot balance.
+The weekly leaderboard job runs automatically every Sunday at **5:00 PM America/Los_Angeles**. That scheduled post is the only leaderboard that deliberately tags leaderboard players, ranks by weekly $NKFE earned, and then resets weekly leaderboard stats. Rewards stay in the Farmer Pets bot database as withdrawable balances until players run `/fp-withdraw`; when direct WAX withdrawal variables are configured, the bot signs and pushes a transfer from `roadisledger` to the player's verified wallet and then deducts the in-bot balance.
 
 ## Health endpoint
 

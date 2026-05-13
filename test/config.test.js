@@ -24,8 +24,12 @@ const ENV_NAMES = [
   "ATOMIC_API",
   "FARMER_PETS_API",
   "CONTRACT_ACCOUNT",
+  "WAX_RPC_URL",
   "NKFE_PAYOUT_SOURCE_WALLET",
+  "NKFE_TREASURY_PRIVATE_KEY",
+  "NKFE_TOKEN_CONTRACT",
   "NKFE_TOKEN_SYMBOL",
+  "NKFE_TOKEN_PRECISION",
   "NKFE_WITHDRAWAL_WEBHOOK_URL",
   "NKFE_WITHDRAWAL_WEBHOOK_SECRET",
   "NKFE_WITHDRAWAL_MEMO",
@@ -74,8 +78,12 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.ATOMIC_API, "https://wax.api.atomicassets.io/atomicassets/v1/assets");
     assert.equal(config.FARMER_PETS_API, "https://pets-api-main.herokuapp.com");
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
+    assert.equal(config.WAX_RPC_URL, "https://wax.greymass.com");
     assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "roadisledger");
+    assert.equal(config.NKFE_TREASURY_PRIVATE_KEY, "");
+    assert.equal(config.NKFE_TOKEN_CONTRACT, "");
     assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_TOKEN_PRECISION, 4);
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "");
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "");
     assert.equal(config.NKFE_WITHDRAWAL_MEMO, "Farmer Pets $NKFE withdrawal");
@@ -103,8 +111,12 @@ test("config allows deployment environment to override channel, role, and API va
     ATOMIC_API: "https://atomic.example.test/assets",
     FARMER_PETS_API: "https://pets.example.test",
     CONTRACT_ACCOUNT: "contractacct",
+    WAX_RPC_URL: "https://wax.example",
     NKFE_PAYOUT_SOURCE_WALLET: "sourcewallet",
+    NKFE_TREASURY_PRIVATE_KEY: "private-key",
+    NKFE_TOKEN_CONTRACT: "nkfe.token",
     NKFE_TOKEN_SYMBOL: "NKFE",
+    NKFE_TOKEN_PRECISION: "8",
     NKFE_WITHDRAWAL_WEBHOOK_URL: "https://withdraw.example",
     NKFE_WITHDRAWAL_WEBHOOK_SECRET: "secret",
     NKFE_WITHDRAWAL_MEMO: "memo",
@@ -126,8 +138,12 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.ATOMIC_API, "https://atomic.example.test/assets");
     assert.equal(config.FARMER_PETS_API, "https://pets.example.test");
     assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
+    assert.equal(config.WAX_RPC_URL, "https://wax.example");
     assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "sourcewallet");
+    assert.equal(config.NKFE_TREASURY_PRIVATE_KEY, "private-key");
+    assert.equal(config.NKFE_TOKEN_CONTRACT, "nkfe.token");
     assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_TOKEN_PRECISION, 8);
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "https://withdraw.example");
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "secret");
     assert.equal(config.NKFE_WITHDRAWAL_MEMO, "memo");
