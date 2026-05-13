@@ -113,12 +113,9 @@ function createPlayerStatsService({
       0
     );
 
-    let payoutSummary = "Automatic $NKFE payout service is not configured.";
-
-    if (payoutService) {
-      const payoutResult = await payoutService.sendAutomaticWeeklyPayouts(payoutRows);
-      payoutSummary = payoutService.formatAutomaticPayoutSummary(payoutResult);
-    }
+    const payoutSummary = payoutService
+      ? payoutService.formatWeeklyLedgerSummary({ payoutRows })
+      : "Withdrawable $NKFE remains in the Farmer Pets bot ledger. Players can request their own withdrawal with **/fp-withdraw**.";
 
     await channel.send({
       content:

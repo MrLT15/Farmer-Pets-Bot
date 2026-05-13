@@ -24,6 +24,9 @@ const ENV_NAMES = [
   "ATOMIC_API",
   "FARMER_PETS_API",
   "CONTRACT_ACCOUNT",
+  "NKFE_PAYOUT_SOURCE_WALLET",
+  "NKFE_TOKEN_SYMBOL",
+  "ENABLE_VERIFIED_MEMBER_DMS",
   "HEALTH_PORT",
   "PORT",
   "ENABLE_EVENT_THREADS",
@@ -69,7 +72,6 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.FARMER_PETS_API, "https://pets-api-main.herokuapp.com");
     assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
     assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "roadisledger");
-    assert.equal(config.NKFE_TOKEN_CONTRACT, "");
     assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, true);
     assert.equal(config.HEALTH_PORT, undefined);
@@ -96,11 +98,7 @@ test("config allows deployment environment to override channel, role, and API va
     FARMER_PETS_API: "https://pets.example.test",
     CONTRACT_ACCOUNT: "contractacct",
     NKFE_PAYOUT_SOURCE_WALLET: "sourcewallet",
-    NKFE_TOKEN_CONTRACT: "nkfe.token",
     NKFE_TOKEN_SYMBOL: "NKFE",
-    NKFE_PAYOUT_WEBHOOK_URL: "https://payout.example",
-    NKFE_PAYOUT_WEBHOOK_SECRET: "secret",
-    NKFE_PAYOUT_MEMO: "memo",
     HEALTH_PORT: "8080",
     ENABLE_EVENT_THREADS: "false",
     ENABLE_VERIFIED_MEMBER_DMS: "false",
@@ -120,11 +118,7 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.FARMER_PETS_API, "https://pets.example.test");
     assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
     assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "sourcewallet");
-    assert.equal(config.NKFE_TOKEN_CONTRACT, "nkfe.token");
     assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
-    assert.equal(config.NKFE_PAYOUT_WEBHOOK_URL, "https://payout.example");
-    assert.equal(config.NKFE_PAYOUT_WEBHOOK_SECRET, "secret");
-    assert.equal(config.NKFE_PAYOUT_MEMO, "memo");
     assert.equal(config.HEALTH_PORT, "8080");
     assert.equal(config.ENABLE_EVENT_THREADS, false);
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, false);

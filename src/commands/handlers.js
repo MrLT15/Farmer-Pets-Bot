@@ -11,6 +11,8 @@ function createCommandHandlers({
   flagsEphemeral,
   getAssets,
   getPayoutRows,
+  getPendingWithdrawalRows,
+  getPlayerBalance,
   getWallet,
   getActiveFarmEvent,
   commanderEventCooldowns = new Map(),
@@ -18,6 +20,7 @@ function createCommandHandlers({
   handleDailyCheckIn,
   handleRescue,
   postWeeklyLeaderboardAndReset,
+  requestWithdrawal,
   resetPayouts,
   startCommunityFarmEvent,
   startFarmEvent,
@@ -56,9 +59,19 @@ function createCommandHandlers({
       flagsEphemeral,
       getPayoutRows
     }),
+    "fp-withdraw": interaction => handleWithdrawCommand(interaction, {
+      flagsEphemeral,
+      getPlayerBalance,
+      getWallet,
+      requestWithdrawal
+    }),
     "fp-resetpayouts": interaction => handleResetPayoutsCommand(interaction, {
       flagsEphemeral,
       resetPayouts
+    }),
+    "fp-withdrawals": interaction => handleWithdrawalsCommand(interaction, {
+      flagsEphemeral,
+      getPendingWithdrawalRows
     }),
     "fp-testevent": interaction => handleTestEventCommand(interaction, {
       flagsEphemeral,
@@ -259,6 +272,75 @@ async function handlePayoutsCommand(interaction, { flagsEphemeral, getPayoutRows
       lines.join("\n") +
       "\n\nAfter manual payment, run `/fp-resetpayouts`.",
     flags: flagsEphemeral
+  });
+}
+
+
+async function handleWithdrawCommand(interaction, {
+  flagsEphemeral,
+  getPlayerBalance,
+  getWallet,
+  requestWithdrawal
+}) {
+  await interaction.deferReply({ flags: flagsEphemeral });
+
+  const wallet = await getWallet(interaction.user.id);
+
+  if (!wallet) {
+    await interaction.editReply("No verified wallet found. Please verify your wallet first using `/verify`.");
+    return;
+  }
+
+  const balance = await getPlayerBalance(interaction.user.id);
+  const available = Number(balance?.payout_nkfe || 0);
+
+  if (!available) {
+    await interaction.editReply("You do not have any withdrawable Farmer Pets $NKFE yet.");
+    return;
+  }
+
+  const requestedAmount = interaction.options?.getInteger?.("amount") || available;
+
+  if (requestedAmount > available) {
+    await interaction.editReply(`You only have **${available} $NKFE** available to withdraw.`);
+    return;
+  }
+
+  const result = await requestWithdrawal(interaction.user.id, wallet, requestedAmount);
+
+  if (!result.ok) {
+    await interaction.editReply(`Withdrawal request could not be created. Available balance: **${result.available || 0} $NKFE**.`);
+    return;
+  }
+
+  await interaction.editReply(
+    `✅ Withdrawal request **#${result.withdrawal.id}** created for **${result.withdrawal.amount_nkfe} $NKFE** to wallet **${wallet}**. ` +
+    `Remaining bot balance: **${result.remaining} $NKFE**.`
+  );
+}
+
+async function handleWithdrawalsCommand(interaction, { flagsEphemeral, getPendingWithdrawalRows }) {
+  const rows = await getPendingWithdrawalRows();
+
+  if (!rows.length) {
+    await interaction.reply({
+      content: "No pending Farmer Pets $NKFE withdrawal requests.",
+      flags: flagsEphemeral
+    });
+    return;
+  }
+
+  const lines = rows.map(row =>
+    `#${row.id} — ${row.wallet} — **${row.amount_nkfe} $NKFE** — Discord ID ${row.discord_id}`
+  );
+
+  await interaction.reply({
+    content:
+      "🏦 **Pending Farmer Pets $NKFE Withdrawals**\n\n" +
+      lines.join("\n") +
+      "\n\nProcess these from the treasury/withdrawal system; the bot has already locked these amounts out of player balances.",
+    flags: flagsEphemeral,
+    allowedMentions: { parse: [], users: [], roles: [] }
   });
 }
 

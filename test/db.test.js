@@ -40,12 +40,15 @@ test("createDatabase exposes the database helper surface", () => {
     "ensurePlayer",
     "getDailyCheckInState",
     "getPayoutRows",
+    "getPendingWithdrawalRows",
+    "getPlayerBalance",
     "getStatsRow",
     "getWallet",
     "getWeeklyLeaderboardRows",
     "initDatabase",
     "recordDailyCheckIn",
     "recordRescue",
+    "requestWithdrawal",
     "resetPayouts",
     "resetWeeklyStats",
     "validateRequiredTables"
@@ -96,16 +99,18 @@ test("initDatabase validates dependencies, creates tables, and logs readiness", 
     { rows: [{ column_name: "discord_id" }, { column_name: "wallet" }] },
     { rows: [] },
     { rows: [] },
+    { rows: [] },
     { rows: [] }
   ]);
   const db = createDatabase(pool, { logger: { log: message => logs.push(message) } });
 
   await db.initDatabase();
 
-  assert.equal(pool.calls.length, 5);
+  assert.equal(pool.calls.length, 6);
   assert.match(normalizeSql(pool.calls[2].sql), /CREATE TABLE IF NOT EXISTS farmerpets_balances/);
   assert.match(normalizeSql(pool.calls[3].sql), /ALTER TABLE farmerpets_balances/);
-  assert.match(normalizeSql(pool.calls[4].sql), /CREATE TABLE IF NOT EXISTS farmerpets_logs/);
+  assert.match(normalizeSql(pool.calls[4].sql), /CREATE TABLE IF NOT EXISTS farmerpets_withdrawals/);
+  assert.match(normalizeSql(pool.calls[5].sql), /CREATE TABLE IF NOT EXISTS farmerpets_logs/);
   assert.deepEqual(logs, ["Farmer Pets database tables ready."]);
 });
 
@@ -173,4 +178,43 @@ test("clearPayoutsForDiscordIds skips empty paid id lists", async () => {
 
   assert.equal(await db.clearPayoutsForDiscordIds([]), 0);
   assert.deepEqual(pool.calls, []);
+});
+
+
+test("requestWithdrawal locks bot balance and creates a pending withdrawal", async () => {
+  const pool = createMockPool([
+    { rows: [] },
+    { rows: [{ payout_nkfe: 12 }] },
+    { rows: [] },
+    { rows: [{ id: 9, discord_id: "discord-1", wallet: "farmer.wam", amount_nkfe: 5, status: "pending" }] },
+    { rows: [] }
+  ]);
+  const db = createDatabase(pool);
+
+  const result = await db.requestWithdrawal("discord-1", "farmer.wam", 5);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.remaining, 7);
+  assert.equal(result.withdrawal.id, 9);
+  assert.equal(pool.calls[0].sql, "BEGIN");
+  assert.match(normalizeSql(pool.calls[1].sql), /FOR UPDATE/);
+  assert.match(normalizeSql(pool.calls[2].sql), /SET payout_nkfe = payout_nkfe - \$2/);
+  assert.match(normalizeSql(pool.calls[3].sql), /INSERT INTO farmerpets_withdrawals/);
+  assert.equal(pool.calls[4].sql, "COMMIT");
+});
+
+test("requestWithdrawal rejects requests above available balance", async () => {
+  const pool = createMockPool([
+    { rows: [] },
+    { rows: [{ payout_nkfe: 3 }] },
+    { rows: [] }
+  ]);
+  const db = createDatabase(pool);
+
+  assert.deepEqual(await db.requestWithdrawal("discord-1", "farmer.wam", 5), {
+    ok: false,
+    available: 3,
+    requested: 5
+  });
+  assert.equal(pool.calls[2].sql, "ROLLBACK");
 });

@@ -195,6 +195,8 @@ function createBotApp({
       flagsEphemeral: config.FLAGS_EPHEMERAL,
       getAssets: assetService.getAssets,
       getPayoutRows: db.getPayoutRows,
+      getPendingWithdrawalRows: db.getPendingWithdrawalRows,
+      getPlayerBalance: db.getPlayerBalance,
       getWallet: db.getWallet,
       getActiveFarmEvent: () => activeFarmEvent,
       commanderEventCooldowns,
@@ -202,9 +204,10 @@ function createBotApp({
       handleDailyCheckIn: playerStatsService.handleDailyCheckIn,
       handleRescue,
       postWeeklyLeaderboardAndReset: () => playerStatsService.postWeeklyLeaderboardAndReset(client),
+      requestWithdrawal: db.requestWithdrawal,
       resetPayouts: db.resetPayouts,
       startCommunityFarmEvent,
-    startFarmEvent,
+      startFarmEvent,
       syncRoles: roleService.syncRoles,
       uptime: processLike.uptime ? () => processLike.uptime() : undefined
     });

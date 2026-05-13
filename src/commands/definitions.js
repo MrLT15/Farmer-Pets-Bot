@@ -26,6 +26,14 @@ const commands = [
     .setDescription("Start a Commander-led Farmer Pets community rescue event"),
 
   new SlashCommandBuilder()
+    .setName("fp-withdraw")
+    .setDescription("Request a withdrawal from your Farmer Pets $NKFE bot balance")
+    .addIntegerOption(option => option
+      .setName("amount")
+      .setDescription("Amount of $NKFE to withdraw; leave blank to withdraw your full balance")
+      .setMinValue(1)),
+
+  new SlashCommandBuilder()
     .setName("fp-payouts")
     .setDescription("Admin: show Farmer Pets NKFE payouts owed")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -33,6 +41,11 @@ const commands = [
   new SlashCommandBuilder()
     .setName("fp-resetpayouts")
     .setDescription("Admin: reset Farmer Pets payout balances after manual payment")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("fp-withdrawals")
+    .setDescription("Admin: show pending Farmer Pets $NKFE withdrawal requests")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()

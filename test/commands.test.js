@@ -5,10 +5,13 @@ const { buildEventStatusMessage, createCommandHandlers, formatDuration } = requi
 
 const FLAGS_EPHEMERAL = 64;
 
-function createMockInteraction({ userId = "discord-user", displayName = "Test Farmer" } = {}) {
+function createMockInteraction({ userId = "discord-user", displayName = "Test Farmer", amount = null } = {}) {
   const member = { displayName };
   const interaction = {
     user: { id: userId },
+    options: {
+      getInteger: name => (name === "amount" ? amount : null)
+    },
     guild: {
       members: {
         fetchCalls: [],
@@ -60,12 +63,15 @@ function createHandlers(overrides = {}) {
     flagsEphemeral: FLAGS_EPHEMERAL,
     getAssets: async () => ({ walletAssets: [], stakedAssets: [], combinedAssets: [] }),
     getPayoutRows: async () => [],
+    getPendingWithdrawalRows: async () => [],
+    getPlayerBalance: async () => ({ payout_nkfe: 0 }),
     getWallet: async () => "wallet.wam",
     getActiveFarmEvent: () => null,
     getRemainingEventMs: () => 125000,
     handleDailyCheckIn: async interaction => interaction.reply({ content: "daily" }),
     handleRescue: async interaction => interaction.reply({ content: "rescue" }),
     postWeeklyLeaderboardAndReset: async () => {},
+    requestWithdrawal: async () => ({ ok: false, available: 0 }),
     resetPayouts: async () => {},
     startFarmEvent: async () => true,
     syncRoles: async () => ({ added: [], removed: [] }),
@@ -211,6 +217,72 @@ test("fp-payouts handles empty and populated payout lists", async () => {
   assert.match(payload.content, /wallet1 — \*\*7 \$NKFE\*\* — Discord ID 123/);
   assert.match(payload.content, /wallet2 — \*\*3 \$NKFE\*\* — Discord ID 456/);
 });
+
+
+
+test("fp-withdraw creates a player-owned withdrawal request from bot balance", async () => {
+  const calls = [];
+  const handlers = createHandlers({
+    getPlayerBalance: async discordId => {
+      calls.push(["balance", discordId]);
+      return { payout_nkfe: 10 };
+    },
+    requestWithdrawal: async (discordId, wallet, amount) => {
+      calls.push(["withdraw", discordId, wallet, amount]);
+      return {
+        ok: true,
+        remaining: 6,
+        withdrawal: { id: 42, amount_nkfe: 4 }
+      };
+    }
+  });
+  const interaction = createMockInteraction({ amount: 4 });
+
+  await handlers["fp-withdraw"](interaction);
+
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.deepEqual(calls, [
+    ["balance", "discord-user"],
+    ["withdraw", "discord-user", "wallet.wam", 4]
+  ]);
+  assert.match(interaction.editReplyPayloads.at(-1), /Withdrawal request \*\*#42\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Remaining bot balance: \*\*6 \$NKFE\*\*/);
+});
+
+test("fp-withdraw rejects missing wallets and over-balance amounts", async () => {
+  const missingWalletHandlers = createHandlers({ getWallet: async () => null });
+  const missingWalletInteraction = createMockInteraction();
+
+  await missingWalletHandlers["fp-withdraw"](missingWalletInteraction);
+
+  assert.match(missingWalletInteraction.editReplyPayloads.at(-1), /No verified wallet found/);
+
+  const overBalanceHandlers = createHandlers({
+    getPlayerBalance: async () => ({ payout_nkfe: 3 })
+  });
+  const overBalanceInteraction = createMockInteraction({ amount: 5 });
+
+  await overBalanceHandlers["fp-withdraw"](overBalanceInteraction);
+
+  assert.equal(overBalanceInteraction.editReplyPayloads.at(-1), "You only have **3 $NKFE** available to withdraw.");
+});
+
+test("fp-withdrawals lists pending withdrawal requests without pings", async () => {
+  const handlers = createHandlers({
+    getPendingWithdrawalRows: async () => [
+      { id: 1, wallet: "abc.wam", amount_nkfe: 8, discord_id: "123" }
+    ]
+  });
+  const interaction = createMockInteraction();
+
+  await handlers["fp-withdrawals"](interaction);
+
+  const payload = interaction.replyPayloads.at(-1);
+  assert.equal(payload.flags, FLAGS_EPHEMERAL);
+  assert.match(payload.content, /#1 — abc\.wam — \*\*8 \$NKFE\*\* — Discord ID 123/);
+  assert.deepEqual(payload.allowedMentions, { parse: [], users: [], roles: [] });
+});
+
 
 test("fp-resetpayouts resets balances and replies ephemerally", async () => {
   let resetCalled = false;

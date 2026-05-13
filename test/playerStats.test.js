@@ -234,7 +234,8 @@ test("postWeeklyLeaderboardAndReset posts tagged weekly leaderboard, payout stat
   assert.deepEqual(client.channels.fetchCalls, ["leaderboard-channel"]);
   assert.match(sentMessages.at(-1).content, /<@123> — \*\*10 \$NKFE\*/);
   assert.match(sentMessages.at(-1).content, /Total Farmer Pets NKFE Earned This Week:\*\* 10 \$NKFE/);
-  assert.match(sentMessages.at(-1).content, /Automatic \$NKFE payout service is not configured/);
+  assert.match(sentMessages.at(-1).content, /bot ledger/);
+  assert.match(sentMessages.at(-1).content, /\/fp-withdraw/);
   assert.deepEqual(sentMessages.at(-1).allowedMentions, { users: ["123"], roles: [], parse: [] });
   assert.deepEqual(calls, [["resetWeeklyStats"]]);
 });

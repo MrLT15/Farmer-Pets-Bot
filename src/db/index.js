@@ -47,6 +47,18 @@ function createDatabase(dbPool, { logger = console } = {}) {
     `);
 
     await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS farmerpets_withdrawals (
+        id SERIAL PRIMARY KEY,
+        discord_id TEXT NOT NULL,
+        wallet TEXT NOT NULL,
+        amount_nkfe INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        requested_at TIMESTAMPTZ DEFAULT NOW(),
+        processed_at TIMESTAMPTZ
+      );
+    `);
+
+    await dbPool.query(`
       CREATE TABLE IF NOT EXISTS farmerpets_logs (
         id SERIAL PRIMARY KEY,
         discord_id TEXT NOT NULL,
@@ -270,6 +282,79 @@ function createDatabase(dbPool, { logger = console } = {}) {
     return res.rows[0];
   }
 
+
+  async function getPlayerBalance(discordId) {
+    const res = await dbPool.query(
+      `
+      SELECT discord_id, wallet, payout_nkfe, lifetime_nkfe
+      FROM farmerpets_balances
+      WHERE discord_id = $1;
+      `,
+      [discordId]
+    );
+
+    return res.rows[0] || null;
+  }
+
+  async function requestWithdrawal(discordId, wallet, amount) {
+    await dbPool.query("BEGIN");
+
+    try {
+      const balanceRes = await dbPool.query(
+        `
+        SELECT payout_nkfe
+        FROM farmerpets_balances
+        WHERE discord_id = $1
+        FOR UPDATE;
+        `,
+        [discordId]
+      );
+      const available = Number(balanceRes.rows[0]?.payout_nkfe || 0);
+      const requested = amount ? Number(amount) : available;
+
+      if (!available || requested <= 0 || requested > available) {
+        await dbPool.query("ROLLBACK");
+        return { ok: false, available, requested };
+      }
+
+      await dbPool.query(
+        `
+        UPDATE farmerpets_balances
+        SET payout_nkfe = payout_nkfe - $2,
+            updated_at = NOW()
+        WHERE discord_id = $1;
+        `,
+        [discordId, requested]
+      );
+
+      const withdrawalRes = await dbPool.query(
+        `
+        INSERT INTO farmerpets_withdrawals (discord_id, wallet, amount_nkfe)
+        VALUES ($1, $2, $3)
+        RETURNING id, discord_id, wallet, amount_nkfe, status, requested_at;
+        `,
+        [discordId, wallet, requested]
+      );
+
+      await dbPool.query("COMMIT");
+      return { ok: true, withdrawal: withdrawalRes.rows[0], remaining: available - requested };
+    } catch (error) {
+      await dbPool.query("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async function getPendingWithdrawalRows() {
+    const res = await dbPool.query(`
+      SELECT id, discord_id, wallet, amount_nkfe, status, requested_at
+      FROM farmerpets_withdrawals
+      WHERE status = 'pending'
+      ORDER BY requested_at ASC, id ASC;
+    `);
+
+    return res.rows;
+  }
+
   async function getWeeklyLeaderboardRows() {
     const res = await dbPool.query(`
       SELECT discord_id, wallet, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
@@ -336,12 +421,15 @@ function createDatabase(dbPool, { logger = console } = {}) {
     ensurePlayer,
     getDailyCheckInState,
     getPayoutRows,
+    getPendingWithdrawalRows,
+    getPlayerBalance,
     getStatsRow,
     getWallet,
     getWeeklyLeaderboardRows,
     initDatabase,
     recordDailyCheckIn,
     recordRescue,
+    requestWithdrawal,
     resetPayouts,
     resetWeeklyStats,
     validateRequiredTables
