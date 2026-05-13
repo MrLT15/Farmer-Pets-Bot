@@ -33,6 +33,16 @@ const ENV_NAMES = [
   "NKFE_WITHDRAWAL_WEBHOOK_URL",
   "NKFE_WITHDRAWAL_WEBHOOK_SECRET",
   "NKFE_WITHDRAWAL_MEMO",
+  "NKFE_SYSTEM_ENABLED",
+  "NKFE_WITHDRAWALS_ENABLED",
+  "NKFE_PAYOUTS_ENABLED",
+  "NKFE_PAYOUT_API_URL",
+  "NKFE_PAYOUT_API_KEY",
+  "NKFE_PAYOUT_TIMEOUT_MS",
+  "NKFE_TOKEN_DECIMALS",
+  "NKFE_WITHDRAWAL_FEE_PERCENT",
+  "NKFE_WITHDRAWAL_COOLDOWN_DAYS",
+  "DEV_BYPASS_WITHDRAWAL_COOLDOWN",
   "ENABLE_VERIFIED_MEMBER_DMS",
   "HEALTH_PORT",
   "PORT",
@@ -87,6 +97,16 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "");
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "");
     assert.equal(config.NKFE_WITHDRAWAL_MEMO, "Farmer Pets $NKFE withdrawal");
+    assert.equal(config.NKFE_SYSTEM_ENABLED, true);
+    assert.equal(config.NKFE_WITHDRAWALS_ENABLED, true);
+    assert.equal(config.NKFE_PAYOUTS_ENABLED, true);
+    assert.equal(config.NKFE_PAYOUT_API_URL, "");
+    assert.equal(config.NKFE_PAYOUT_API_KEY, "");
+    assert.equal(config.NKFE_PAYOUT_TIMEOUT_MS, 15000);
+    assert.equal(config.NKFE_TOKEN_DECIMALS, 8);
+    assert.equal(config.NKFE_WITHDRAWAL_FEE_PERCENT, 0.03);
+    assert.equal(config.NKFE_WITHDRAWAL_COOLDOWN_DAYS, 14);
+    assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, false);
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, true);
     assert.equal(config.HEALTH_PORT, undefined);
     assert.equal(config.ENABLE_EVENT_THREADS, true);
@@ -120,6 +140,16 @@ test("config allows deployment environment to override channel, role, and API va
     NKFE_WITHDRAWAL_WEBHOOK_URL: "https://withdraw.example",
     NKFE_WITHDRAWAL_WEBHOOK_SECRET: "secret",
     NKFE_WITHDRAWAL_MEMO: "memo",
+    NKFE_SYSTEM_ENABLED: "false",
+    NKFE_WITHDRAWALS_ENABLED: "false",
+    NKFE_PAYOUTS_ENABLED: "false",
+    NKFE_PAYOUT_API_URL: "https://payout.example/nkfe",
+    NKFE_PAYOUT_API_KEY: "api-key",
+    NKFE_PAYOUT_TIMEOUT_MS: "20000",
+    NKFE_TOKEN_DECIMALS: "6",
+    NKFE_WITHDRAWAL_FEE_PERCENT: "0.05",
+    NKFE_WITHDRAWAL_COOLDOWN_DAYS: "7",
+    DEV_BYPASS_WITHDRAWAL_COOLDOWN: "true",
     HEALTH_PORT: "8080",
     ENABLE_EVENT_THREADS: "false",
     ENABLE_VERIFIED_MEMBER_DMS: "false",
@@ -147,6 +177,16 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "https://withdraw.example");
     assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "secret");
     assert.equal(config.NKFE_WITHDRAWAL_MEMO, "memo");
+    assert.equal(config.NKFE_SYSTEM_ENABLED, false);
+    assert.equal(config.NKFE_WITHDRAWALS_ENABLED, false);
+    assert.equal(config.NKFE_PAYOUTS_ENABLED, false);
+    assert.equal(config.NKFE_PAYOUT_API_URL, "https://payout.example/nkfe");
+    assert.equal(config.NKFE_PAYOUT_API_KEY, "api-key");
+    assert.equal(config.NKFE_PAYOUT_TIMEOUT_MS, 20000);
+    assert.equal(config.NKFE_TOKEN_DECIMALS, 6);
+    assert.equal(config.NKFE_WITHDRAWAL_FEE_PERCENT, 0.05);
+    assert.equal(config.NKFE_WITHDRAWAL_COOLDOWN_DAYS, 7);
+    assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, true);
     assert.equal(config.HEALTH_PORT, "8080");
     assert.equal(config.ENABLE_EVENT_THREADS, false);
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, false);

@@ -61,6 +61,7 @@ function createCommandHandlers({
       getPayoutRows
     }),
     "fp-withdraw": interaction => handleWithdrawCommand(interaction, {
+      config,
       flagsEphemeral,
       getPlayerBalance,
       getWallet,
@@ -279,6 +280,7 @@ async function handlePayoutsCommand(interaction, { flagsEphemeral, getPayoutRows
 
 
 async function handleWithdrawCommand(interaction, {
+  config = {},
   flagsEphemeral,
   getPlayerBalance,
   getWallet,
@@ -304,6 +306,11 @@ async function handleWithdrawCommand(interaction, {
 
   const requestedAmount = interaction.options?.getInteger?.("amount") || available;
 
+  if (requestedAmount <= 0) {
+    await interaction.editReply("Withdrawal amount must be greater than 0 $NKFE.");
+    return;
+  }
+
   if (requestedAmount > available) {
     await interaction.editReply(`You only have **${available} $NKFE** available to withdraw.`);
     return;
@@ -313,20 +320,30 @@ async function handleWithdrawCommand(interaction, {
     interaction.user.id,
     wallet,
     requestedAmount,
-    payoutService ? payload => payoutService.sendWithdrawal(payload) : undefined
+    payoutService ? payload => payoutService.executeNkfePayout(payload) : undefined,
+    {
+      tokenDecimals: config.NKFE_TOKEN_DECIMALS,
+      feePercent: config.NKFE_WITHDRAWAL_FEE_PERCENT,
+      cooldownDays: config.NKFE_WITHDRAWAL_COOLDOWN_DAYS,
+      bypassCooldown: config.DEV_BYPASS_WITHDRAWAL_COOLDOWN
+    }
   );
 
   if (!result.ok) {
     await interaction.editReply(
-      `Automatic withdrawal could not be completed. ${result.error || `Available balance: **${result.available || 0} $NKFE**.`}`
+      `❌ Withdrawal failed and your balance was not lost/reverted. Reason: ${result.error || `Available balance: **${result.available || 0} $NKFE**.`}`
     );
     return;
   }
 
   await interaction.editReply(
-    `✅ Sent **${result.withdrawal.amount_nkfe} $NKFE** to wallet **${wallet}**. ` +
-    `Remaining bot balance: **${result.remaining} $NKFE**.` +
-    `${result.transactionId ? ` Transaction: **${result.transactionId}**.` : ""}`
+    "✅ Farmer Pets NKFE withdrawal sent.\n" +
+    `Gross: **${result.grossAmount || result.withdrawal.amount_nkfe} $NKFE**\n` +
+    `Fee: **${result.feeAmount || "0"} $NKFE**\n` +
+    `Net Sent: **${result.netAmount || result.withdrawal.amount_nkfe} $NKFE**\n` +
+    `Wallet: **${wallet}**\n` +
+    `${result.transactionId ? `Tx: **${result.transactionId}**\n` : ""}` +
+    `Remaining bot balance: **${result.remaining} $NKFE**.`
   );
 }
 

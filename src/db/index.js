@@ -1,6 +1,7 @@
 const { Pool } = require("pg");
 
 const { DATABASE_URL } = require("../config");
+const { calculateFeeUnits, formatTokenAmount, toUnits } = require("../services/payouts");
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -61,7 +62,26 @@ function createDatabase(dbPool, { logger = console } = {}) {
 
     await dbPool.query(`
       ALTER TABLE farmerpets_withdrawals
-        ADD COLUMN IF NOT EXISTS transaction_id TEXT;
+        ADD COLUMN IF NOT EXISTS transaction_id TEXT,
+        ADD COLUMN IF NOT EXISTS tx_id TEXT,
+        ADD COLUMN IF NOT EXISTS gross_amount_units TEXT,
+        ADD COLUMN IF NOT EXISTS fee_units TEXT,
+        ADD COLUMN IF NOT EXISTS net_amount_units TEXT,
+        ADD COLUMN IF NOT EXISTS payout_error TEXT,
+        ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+    `);
+
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS farmerpets_nkfe_ledger (
+        id SERIAL PRIMARY KEY,
+        discord_id TEXT NOT NULL,
+        wallet TEXT NOT NULL,
+        entry_type TEXT NOT NULL,
+        amount_units TEXT NOT NULL,
+        fee_units TEXT NOT NULL DEFAULT '0',
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
     await dbPool.query(`
@@ -302,7 +322,29 @@ function createDatabase(dbPool, { logger = console } = {}) {
     return res.rows[0] || null;
   }
 
-  async function requestWithdrawal(discordId, wallet, amount, sendWithdrawal) {
+  async function requestWithdrawal(discordId, wallet, amount, executePayout, options = {}) {
+    const tokenDecimals = Number(options.tokenDecimals ?? 8);
+    const cooldownDays = Number(options.cooldownDays ?? 14);
+    const bypassCooldown = Boolean(options.bypassCooldown);
+
+    if (cooldownDays > 0 && !bypassCooldown) {
+      const cooldown = await getWithdrawalCooldown(discordId, cooldownDays);
+      if (cooldown.active) {
+        return {
+          ok: false,
+          error: `You can withdraw again in ${cooldown.remainingLabel}.`,
+          cooldown
+        };
+      }
+    }
+
+    let pendingWithdrawal;
+    let available = 0;
+    let requested = 0;
+    let grossUnits = 0n;
+    let feeUnits = 0n;
+    let netUnits = 0n;
+
     await dbPool.query("BEGIN");
 
     try {
@@ -315,39 +357,39 @@ function createDatabase(dbPool, { logger = console } = {}) {
         `,
         [discordId]
       );
-      const available = Number(balanceRes.rows[0]?.payout_nkfe || 0);
-      const requested = amount ? Number(amount) : available;
+      available = Number(balanceRes.rows[0]?.payout_nkfe || 0);
+      requested = amount ? Number(amount) : available;
 
-      if (!available || requested <= 0 || requested > available) {
+      if (!available || !Number.isFinite(requested) || requested <= 0 || requested > available) {
         await dbPool.query("ROLLBACK");
         return { ok: false, available, requested };
       }
 
-      if (typeof sendWithdrawal !== "function") {
+      if (typeof executePayout !== "function") {
         await dbPool.query("ROLLBACK");
         return {
           ok: false,
           available,
           requested,
-          error: "Automatic $NKFE withdrawals are not configured yet."
+          error: "NKFE payout API is not configured. Set NKFE_PAYOUT_API_URL in Render."
         };
       }
 
-      const payoutResult = await sendWithdrawal({
-        discordId,
-        wallet,
-        amount: requested
-      });
+      grossUnits = toUnits(requested, tokenDecimals);
+      feeUnits = calculateFeeUnits(grossUnits, options.feePercent);
+      netUnits = grossUnits - feeUnits;
 
-      if (!payoutResult?.ok) {
-        await dbPool.query("ROLLBACK");
-        return {
-          ok: false,
-          available,
-          requested,
-          error: payoutResult?.error || "Automatic $NKFE withdrawal failed."
-        };
-      }
+      const withdrawalRes = await dbPool.query(
+        `
+        INSERT INTO farmerpets_withdrawals (
+          discord_id, wallet, amount_nkfe, gross_amount_units, fee_units, net_amount_units, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+        RETURNING id, discord_id, wallet, amount_nkfe, gross_amount_units, fee_units, net_amount_units, status, requested_at;
+        `,
+        [discordId, wallet, requested, grossUnits.toString(), feeUnits.toString(), netUnits.toString()]
+      );
+      pendingWithdrawal = withdrawalRes.rows[0];
 
       await dbPool.query(
         `
@@ -359,28 +401,156 @@ function createDatabase(dbPool, { logger = console } = {}) {
         [discordId, requested]
       );
 
-      const withdrawalRes = await dbPool.query(
-        `
-        INSERT INTO farmerpets_withdrawals (
-          discord_id, wallet, amount_nkfe, status, processed_at, transaction_id
-        )
-        VALUES ($1, $2, $3, 'completed', NOW(), $4)
-        RETURNING id, discord_id, wallet, amount_nkfe, status, requested_at, processed_at, transaction_id;
-        `,
-        [discordId, wallet, requested, payoutResult.transactionId || null]
-      );
+      await insertLedgerEntry({
+        discordId,
+        wallet,
+        entryType: "withdrawal_debit",
+        amountUnits: grossUnits,
+        feeUnits,
+        metadata: { withdrawalId: pendingWithdrawal.id, status: "pending" }
+      });
 
       await dbPool.query("COMMIT");
-      return {
-        ok: true,
-        withdrawal: withdrawalRes.rows[0],
-        remaining: available - requested,
-        transactionId: payoutResult.transactionId || null
-      };
     } catch (error) {
       await dbPool.query("ROLLBACK");
       throw error;
     }
+
+    try {
+      const payoutResult = await executePayout({
+        withdrawalId: pendingWithdrawal.id,
+        toWallet: wallet,
+        netUnits,
+        grossUnits,
+        feeUnits,
+        discordId
+      });
+      if (payoutResult?.ok === false) {
+        throw new Error(payoutResult.error || "NKFE payout API rejected the withdrawal.");
+      }
+      const transactionId = payoutResult?.transactionId || null;
+      const completedRes = await dbPool.query(
+        `
+        UPDATE farmerpets_withdrawals
+        SET status = 'completed',
+            transaction_id = $2,
+            tx_id = $2,
+            processed_at = NOW(),
+            completed_at = NOW(),
+            payout_error = NULL
+        WHERE id = $1
+        RETURNING id, discord_id, wallet, amount_nkfe, gross_amount_units, fee_units, net_amount_units, status, requested_at, processed_at, completed_at, transaction_id, tx_id;
+        `,
+        [pendingWithdrawal.id, transactionId]
+      );
+
+      await insertLedgerEntry({
+        discordId,
+        wallet,
+        entryType: "withdrawal_completed",
+        amountUnits: netUnits,
+        feeUnits,
+        metadata: { withdrawalId: pendingWithdrawal.id, transactionId }
+      });
+
+      return {
+        ok: true,
+        withdrawal: completedRes.rows[0] || { ...pendingWithdrawal, status: "completed", transaction_id: transactionId, tx_id: transactionId },
+        remaining: available - requested,
+        transactionId,
+        grossUnits: grossUnits.toString(),
+        feeUnits: feeUnits.toString(),
+        netUnits: netUnits.toString(),
+        grossAmount: formatTokenAmount(grossUnits, tokenDecimals),
+        feeAmount: formatTokenAmount(feeUnits, tokenDecimals),
+        netAmount: formatTokenAmount(netUnits, tokenDecimals)
+      };
+    } catch (error) {
+      const payoutError = error?.message || "NKFE payout API request failed.";
+      await dbPool.query("BEGIN");
+      try {
+        await dbPool.query(
+          `
+          UPDATE farmerpets_balances
+          SET payout_nkfe = payout_nkfe + $2,
+              updated_at = NOW()
+          WHERE discord_id = $1;
+          `,
+          [discordId, requested]
+        );
+        await dbPool.query(
+          `
+          UPDATE farmerpets_withdrawals
+          SET status = 'failed',
+              payout_error = $2,
+              processed_at = NOW()
+          WHERE id = $1;
+          `,
+          [pendingWithdrawal.id, payoutError]
+        );
+        await insertLedgerEntry({
+          discordId,
+          wallet,
+          entryType: "withdrawal_failed_refund",
+          amountUnits: grossUnits,
+          feeUnits,
+          metadata: { withdrawalId: pendingWithdrawal.id, error: payoutError }
+        });
+        await dbPool.query("COMMIT");
+      } catch (refundError) {
+        await dbPool.query("ROLLBACK");
+        throw refundError;
+      }
+
+      return {
+        ok: false,
+        available,
+        requested,
+        refunded: true,
+        withdrawal: pendingWithdrawal,
+        error: payoutError
+      };
+    }
+  }
+
+  async function getWithdrawalCooldown(discordId, cooldownDays) {
+    const res = await dbPool.query(
+      `
+      SELECT COALESCE(completed_at, processed_at, requested_at) AS completed_at
+      FROM farmerpets_withdrawals
+      WHERE discord_id = $1
+        AND status = 'completed'
+      ORDER BY COALESCE(completed_at, processed_at, requested_at) DESC
+      LIMIT 1;
+      `,
+      [discordId]
+    );
+
+    const completedAt = res.rows[0]?.completed_at;
+    if (!completedAt) return { active: false };
+
+    const completedMs = new Date(completedAt).getTime();
+    const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
+    const remainingMs = completedMs + cooldownMs - Date.now();
+    if (remainingMs <= 0) return { active: false };
+
+    const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+    return {
+      active: true,
+      completedAt,
+      remainingMs,
+      remainingLabel: `${remainingDays} day${remainingDays === 1 ? "" : "s"}`
+    };
+  }
+
+  async function insertLedgerEntry({ discordId, wallet, entryType, amountUnits, feeUnits = 0n, metadata = {} }) {
+    await dbPool.query(
+      `
+      INSERT INTO farmerpets_nkfe_ledger (discord_id, wallet, entry_type, amount_units, fee_units, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb);
+      `,
+      [discordId, wallet, entryType, amountUnits.toString(), feeUnits.toString(), JSON.stringify(metadata)]
+    );
   }
 
   async function getPendingWithdrawalRows() {

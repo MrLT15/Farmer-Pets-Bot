@@ -2,14 +2,15 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  calculateFeeUnits,
   createPayoutService,
-  getMissingDirectWithdrawalConfig
+  formatTokenAmount,
+  toUnits
 } = require("../src/services/payouts");
 
 test("weekly payout summary points players to self-service withdrawals", () => {
   const service = createPayoutService({
     config: {
-      NKFE_PAYOUT_SOURCE_WALLET: "roadisledger",
       NKFE_TOKEN_SYMBOL: "NKFE"
     }
   });
@@ -23,66 +24,79 @@ test("weekly payout summary points players to self-service withdrawals", () => {
 
   assert.match(summary, /12 NKFE/);
   assert.match(summary, /\/fp-withdraw/);
-  assert.match(summary, /roadisledger/);
 });
 
-test("getMissingDirectWithdrawalConfig lists direct withdrawal variables that are absent", () => {
-  assert.deepEqual(getMissingDirectWithdrawalConfig({ WAX_RPC_URL: "https://wax.example" }), [
-    "NKFE_TOKEN_CONTRACT",
-    "NKFE_PAYOUT_SOURCE_WALLET",
-    "NKFE_TREASURY_PRIVATE_KEY"
-  ]);
+test("token unit helpers format decimals and fees", () => {
+  const gross = toUnits(4, 8);
+  const fee = calculateFeeUnits(gross, 0.03);
+
+  assert.equal(gross, 400000000n);
+  assert.equal(fee, 12000000n);
+  assert.equal(formatTokenAmount(gross - fee, 8), "3.88");
 });
 
-test("sendWithdrawal reports missing provider configuration", async () => {
-  const service = createPayoutService({
-    config: {
-      NKFE_PAYOUT_SOURCE_WALLET: "roadisledger",
-      NKFE_TOKEN_SYMBOL: "NKFE"
-    }
-  });
+test("executeNkfePayout reports missing payout API URL", async () => {
+  const service = createPayoutService({ config: {} });
 
-  assert.equal(service.isWithdrawalConfigured(), false);
-  const result = await service.sendWithdrawal({ wallet: "abc.wam", amount: 3 });
-
-  assert.equal(result.ok, false);
-  assert.match(result.error, /Automatic \$NKFE withdrawals are not configured yet/);
-  assert.match(result.error, /WAX_RPC_URL/);
-  assert.match(result.error, /NKFE_TOKEN_CONTRACT/);
-  assert.match(result.error, /NKFE_TREASURY_PRIVATE_KEY/);
-  assert.match(result.error, /NKFE_WITHDRAWAL_WEBHOOK_URL/);
+  await assert.rejects(
+    () => service.executeNkfePayout({
+      withdrawalId: 1,
+      toWallet: "abc.wam",
+      netUnits: 1n,
+      grossUnits: 1n,
+      feeUnits: 0n,
+      discordId: "123"
+    }),
+    /NKFE_PAYOUT_API_URL/
+  );
 });
 
-test("sendWithdrawal posts to configured provider and returns transaction id", async () => {
+test("executeNkfePayout posts RoA-style payload and returns transaction id", async () => {
   const requests = [];
   const service = createPayoutService({
     config: {
-      NKFE_PAYOUT_SOURCE_WALLET: "roadisledger",
-      NKFE_TOKEN_SYMBOL: "NKFE",
-      NKFE_WITHDRAWAL_WEBHOOK_URL: "https://withdraw.example",
-      NKFE_WITHDRAWAL_WEBHOOK_SECRET: "secret",
-      NKFE_WITHDRAWAL_MEMO: "withdraw memo"
+      NKFE_PAYOUT_API_URL: "https://payout.example/nkfe",
+      NKFE_PAYOUT_API_KEY: "secret",
+      NKFE_PAYOUT_TIMEOUT_MS: 5000,
+      NKFE_TOKEN_DECIMALS: 8
     },
     fetchFn: async (url, options) => {
       requests.push({ url, options });
       return {
         ok: true,
-        json: async () => ({ transactionId: "tx123" })
+        json: async () => ({ tx_id: "wax-tx-123" })
       };
     }
   });
 
-  assert.equal(service.isWithdrawalConfigured(), true);
-  assert.deepEqual(
-    await service.sendWithdrawal({ discordId: "123", wallet: "abc.wam", amount: 4 }),
-    { ok: true, transactionId: "tx123" }
-  );
-  assert.equal(requests[0].url, "https://withdraw.example");
+  const result = await service.executeNkfePayout({
+    withdrawalId: 42,
+    toWallet: "abc.wam",
+    netUnits: 388000000n,
+    grossUnits: 400000000n,
+    feeUnits: 12000000n,
+    discordId: "discord-1"
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    transactionId: "wax-tx-123",
+    response: { tx_id: "wax-tx-123" }
+  });
+  assert.equal(requests[0].url, "https://payout.example/nkfe");
   assert.equal(requests[0].options.headers.authorization, "Bearer secret");
   assert.deepEqual(JSON.parse(requests[0].options.body), {
-    sourceWallet: "roadisledger",
-    tokenSymbol: "NKFE",
-    memo: "withdraw memo",
-    withdrawal: { discordId: "123", wallet: "abc.wam", amount: 4 }
+    toWallet: "abc.wam",
+    amountUnits: "388000000",
+    amount: "3.88",
+    tokenIdentifier: "NKFE",
+    memo: "Farmer Pets NKFE Withdrawal #42",
+    metadata: {
+      withdrawalId: 42,
+      discordId: "discord-1",
+      grossUnits: "400000000",
+      feeUnits: "12000000",
+      source: "farmer_pets"
+    }
   });
 });

@@ -101,18 +101,20 @@ test("initDatabase validates dependencies, creates tables, and logs readiness", 
     { rows: [] },
     { rows: [] },
     { rows: [] },
+    { rows: [] },
     { rows: [] }
   ]);
   const db = createDatabase(pool, { logger: { log: message => logs.push(message) } });
 
   await db.initDatabase();
 
-  assert.equal(pool.calls.length, 7);
+  assert.equal(pool.calls.length, 8);
   assert.match(normalizeSql(pool.calls[2].sql), /CREATE TABLE IF NOT EXISTS farmerpets_balances/);
   assert.match(normalizeSql(pool.calls[3].sql), /ALTER TABLE farmerpets_balances/);
   assert.match(normalizeSql(pool.calls[4].sql), /CREATE TABLE IF NOT EXISTS farmerpets_withdrawals/);
   assert.match(normalizeSql(pool.calls[5].sql), /ALTER TABLE farmerpets_withdrawals/);
-  assert.match(normalizeSql(pool.calls[6].sql), /CREATE TABLE IF NOT EXISTS farmerpets_logs/);
+  assert.match(normalizeSql(pool.calls[6].sql), /CREATE TABLE IF NOT EXISTS farmerpets_nkfe_ledger/);
+  assert.match(normalizeSql(pool.calls[7].sql), /CREATE TABLE IF NOT EXISTS farmerpets_logs/);
   assert.deepEqual(logs, ["Farmer Pets database tables ready."]);
 });
 
@@ -183,10 +185,15 @@ test("clearPayoutsForDiscordIds skips empty paid id lists", async () => {
 });
 
 
-test("requestWithdrawal locks bot balance, sends payout, and records completed withdrawal", async () => {
+test("requestWithdrawal debits safely, calls payout API, and records completed withdrawal", async () => {
   const pool = createMockPool([
     { rows: [] },
+    { rows: [] },
     { rows: [{ payout_nkfe: 12 }] },
+    { rows: [{ id: 9, discord_id: "discord-1", wallet: "farmer.wam", amount_nkfe: 5, gross_amount_units: "500000000", fee_units: "15000000", net_amount_units: "485000000", status: "pending" }] },
+    { rows: [] },
+    { rows: [] },
+    { rows: [] },
     { rows: [] },
     { rows: [{ id: 9, discord_id: "discord-1", wallet: "farmer.wam", amount_nkfe: 5, status: "completed", transaction_id: "tx123" }] },
     { rows: [] }
@@ -197,47 +204,62 @@ test("requestWithdrawal locks bot balance, sends payout, and records completed w
   const result = await db.requestWithdrawal("discord-1", "farmer.wam", 5, async payload => {
     payouts.push(payload);
     return { ok: true, transactionId: "tx123" };
-  });
+  }, { tokenDecimals: 8, feePercent: 0.03, cooldownDays: 14 });
 
   assert.equal(result.ok, true);
   assert.equal(result.remaining, 7);
   assert.equal(result.withdrawal.id, 9);
   assert.equal(result.transactionId, "tx123");
-  assert.deepEqual(payouts, [{ discordId: "discord-1", wallet: "farmer.wam", amount: 5 }]);
-  assert.equal(pool.calls[0].sql, "BEGIN");
-  assert.match(normalizeSql(pool.calls[1].sql), /FOR UPDATE/);
-  assert.match(normalizeSql(pool.calls[2].sql), /SET payout_nkfe = payout_nkfe - \$2/);
+  assert.equal(result.grossAmount, "5");
+  assert.equal(result.feeAmount, "0.15");
+  assert.equal(result.netAmount, "4.85");
+  assert.equal(payouts[0].withdrawalId, 9);
+  assert.equal(payouts[0].toWallet, "farmer.wam");
+  assert.equal(payouts[0].grossUnits, 500000000n);
+  assert.equal(payouts[0].feeUnits, 15000000n);
+  assert.equal(payouts[0].netUnits, 485000000n);
+  assert.match(normalizeSql(pool.calls[0].sql), /status = 'completed'/);
+  assert.equal(pool.calls[1].sql, "BEGIN");
+  assert.match(normalizeSql(pool.calls[2].sql), /FOR UPDATE/);
   assert.match(normalizeSql(pool.calls[3].sql), /INSERT INTO farmerpets_withdrawals/);
-  assert.equal(pool.calls[4].sql, "COMMIT");
+  assert.match(normalizeSql(pool.calls[4].sql), /SET payout_nkfe = payout_nkfe - \$2/);
+  assert.match(normalizeSql(pool.calls[5].sql), /INSERT INTO farmerpets_nkfe_ledger/);
+  assert.equal(pool.calls[6].sql, "COMMIT");
+  assert.match(normalizeSql(pool.calls[7].sql), /SET status = 'completed'/);
 });
 
 
 
-test("requestWithdrawal rolls back when the payout provider fails", async () => {
+test("requestWithdrawal refunds balance when the payout API fails", async () => {
   const pool = createMockPool([
     { rows: [] },
+    { rows: [] },
     { rows: [{ payout_nkfe: 12 }] },
+    { rows: [{ id: 10, discord_id: "discord-1", wallet: "farmer.wam", amount_nkfe: 5, status: "pending" }] },
+    { rows: [] },
+    { rows: [] },
+    { rows: [] },
+    { rows: [] },
+    { rows: [] },
+    { rows: [] },
     { rows: [] }
   ]);
   const db = createDatabase(pool);
 
-  assert.deepEqual(
-    await db.requestWithdrawal("discord-1", "farmer.wam", 5, async () => ({
-      ok: false,
-      error: "provider offline"
-    })),
-    {
-      ok: false,
-      available: 12,
-      requested: 5,
-      error: "provider offline"
-    }
-  );
-  assert.equal(pool.calls[2].sql, "ROLLBACK");
+  const result = await db.requestWithdrawal("discord-1", "farmer.wam", 5, async () => {
+    throw new Error("provider offline");
+  }, { cooldownDays: 14 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.refunded, true);
+  assert.equal(result.error, "provider offline");
+  assert.match(normalizeSql(pool.calls[8].sql), /SET payout_nkfe = payout_nkfe \+ \$2/);
+  assert.match(normalizeSql(pool.calls[9].sql), /SET status = 'failed'/);
 });
 
 test("requestWithdrawal rejects requests above available balance", async () => {
   const pool = createMockPool([
+    { rows: [] },
     { rows: [] },
     { rows: [{ payout_nkfe: 3 }] },
     { rows: [] }
@@ -249,5 +271,18 @@ test("requestWithdrawal rejects requests above available balance", async () => {
     available: 3,
     requested: 5
   });
-  assert.equal(pool.calls[2].sql, "ROLLBACK");
+  assert.equal(pool.calls[3].sql, "ROLLBACK");
+});
+
+
+test("requestWithdrawal enforces completed withdrawal cooldown", async () => {
+  const completedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const pool = createMockPool([{ rows: [{ completed_at: completedAt }] }]);
+  const db = createDatabase(pool);
+
+  const result = await db.requestWithdrawal("discord-1", "farmer.wam", 5, async () => ({ ok: true }), { cooldownDays: 14 });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /withdraw again/);
+  assert.equal(pool.calls.length, 1);
 });

@@ -30,16 +30,18 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `5`; controls how long normal rescue events stay open. |
 | `COMMUNITY_EVENT_DURATION_MINUTES` | Optional | Defaults to `10`; controls Commander-started community event duration. |
 | `ATOMIC_API`, `FARMER_PETS_API`, `CONTRACT_ACCOUNT` | Optional | Override only if upstream WAX/Farmer Pets endpoints or contract names change. |
-| `WAX_RPC_URL` | Required for direct withdrawals | WAX RPC endpoint used to push token transfers. Defaults to `https://wax.greymass.com`. |
-| `NKFE_PAYOUT_SOURCE_WALLET` | Required for direct withdrawals | Treasury/source wallet that sends withdrawals. Defaults to `roadisledger`. |
-| `NKFE_TREASURY_PRIVATE_KEY` | Required for direct withdrawals | Active private key for the treasury/source wallet. Store only as a private host secret. |
-| `NKFE_TOKEN_CONTRACT`, `NKFE_TOKEN_SYMBOL`, `NKFE_TOKEN_PRECISION` | Required for direct withdrawals | Token contract and asset formatting used for $NKFE transfers. Symbol defaults to `NKFE`; precision defaults to `4`. |
-| `NKFE_WITHDRAWAL_MEMO` | Optional | Memo included on direct WAX withdrawal transfers. |
-| `NKFE_WITHDRAWAL_WEBHOOK_URL`, `NKFE_WITHDRAWAL_WEBHOOK_SECRET` | Optional fallback | External payout provider endpoint/secret if you do not want the bot to sign WAX transfers directly. |
+| `NKFE_SYSTEM_ENABLED`, `NKFE_WITHDRAWALS_ENABLED`, `NKFE_PAYOUTS_ENABLED` | Optional | RoA-style payout feature flags. All default to `true`; set one to `false` to pause withdrawals. |
+| `NKFE_PAYOUT_API_URL` | Required for `/fp-withdraw` | External payout API endpoint that signs/sends $NKFE. The Discord bot does **not** hold a WAX private key. |
+| `NKFE_PAYOUT_API_KEY` | Optional | Bearer token sent to the payout API when configured. |
+| `NKFE_PAYOUT_TIMEOUT_MS` | Optional | Payout API timeout. Defaults to `15000`. |
+| `NKFE_TOKEN_DECIMALS` | Optional | Decimal places used when converting whole in-bot NKFE balances to payout units. Defaults to `8`. |
+| `NKFE_WITHDRAWAL_FEE_PERCENT` | Optional | Fee applied before sending to the payout API. Defaults to `0.03` (3%). |
+| `NKFE_WITHDRAWAL_COOLDOWN_DAYS`, `DEV_BYPASS_WITHDRAWAL_COOLDOWN` | Optional | Completed-withdrawal cooldown. Defaults to `14` days; dev bypass defaults to `false`. |
+| `WAX_RPC_URL`, `NKFE_TREASURY_PRIVATE_KEY`, `NKFE_WITHDRAWAL_WEBHOOK_URL` | Legacy only | Retained for compatibility, but `/fp-withdraw` now uses `NKFE_PAYOUT_API_URL` instead of a bot-held private key or webhook payout. |
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
 
-If `/fp-withdraw` says automatic withdrawals are not configured, the bot has neither a complete direct WAX setup nor a webhook fallback. For direct withdrawals, the commonly missing host secrets are `NKFE_TOKEN_CONTRACT` and `NKFE_TREASURY_PRIVATE_KEY` (with `WAX_RPC_URL` and `NKFE_PAYOUT_SOURCE_WALLET` also required, though they have defaults in `src/config.js`). Run `npm run doctor -- --skip-db` in the deployed environment to print exactly which withdrawal variables are missing.
+If `/fp-withdraw` says automatic withdrawals are not configured, set `NKFE_PAYOUT_API_URL` in the deployed Render environment (and `NKFE_PAYOUT_API_KEY` if your payout service requires it). Run `npm run doctor -- --skip-db` in the deployed environment to confirm the bot can see the payout API URL.
 
 ## Discord permissions
 

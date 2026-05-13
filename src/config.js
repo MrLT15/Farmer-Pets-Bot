@@ -20,6 +20,16 @@ function envInteger(name, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function envNumber(name, fallback) {
+  const value = process.env[name];
+
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
@@ -60,6 +70,16 @@ const NKFE_TOKEN_PRECISION = envInteger("NKFE_TOKEN_PRECISION", 4);
 const NKFE_WITHDRAWAL_WEBHOOK_URL = env("NKFE_WITHDRAWAL_WEBHOOK_URL", "");
 const NKFE_WITHDRAWAL_WEBHOOK_SECRET = env("NKFE_WITHDRAWAL_WEBHOOK_SECRET", "");
 const NKFE_WITHDRAWAL_MEMO = env("NKFE_WITHDRAWAL_MEMO", "Farmer Pets $NKFE withdrawal");
+const NKFE_SYSTEM_ENABLED = envFlag("NKFE_SYSTEM_ENABLED", true);
+const NKFE_WITHDRAWALS_ENABLED = envFlag("NKFE_WITHDRAWALS_ENABLED", true);
+const NKFE_PAYOUTS_ENABLED = envFlag("NKFE_PAYOUTS_ENABLED", true);
+const NKFE_PAYOUT_API_URL = env("NKFE_PAYOUT_API_URL", "");
+const NKFE_PAYOUT_API_KEY = env("NKFE_PAYOUT_API_KEY", "");
+const NKFE_PAYOUT_TIMEOUT_MS = envInteger("NKFE_PAYOUT_TIMEOUT_MS", 15000);
+const NKFE_TOKEN_DECIMALS = envInteger("NKFE_TOKEN_DECIMALS", 8);
+const NKFE_WITHDRAWAL_FEE_PERCENT = envNumber("NKFE_WITHDRAWAL_FEE_PERCENT", 0.03);
+const NKFE_WITHDRAWAL_COOLDOWN_DAYS = envInteger("NKFE_WITHDRAWAL_COOLDOWN_DAYS", 14);
+const DEV_BYPASS_WITHDRAWAL_COOLDOWN = envFlag("DEV_BYPASS_WITHDRAWAL_COOLDOWN", false);
 const ENABLE_VERIFIED_MEMBER_DMS = envFlag("ENABLE_VERIFIED_MEMBER_DMS", true);
 
 const FLAGS_EPHEMERAL = 64;
@@ -115,6 +135,16 @@ module.exports = {
   NKFE_WITHDRAWAL_WEBHOOK_URL,
   NKFE_WITHDRAWAL_WEBHOOK_SECRET,
   NKFE_WITHDRAWAL_MEMO,
+  NKFE_SYSTEM_ENABLED,
+  NKFE_WITHDRAWALS_ENABLED,
+  NKFE_PAYOUTS_ENABLED,
+  NKFE_PAYOUT_API_URL,
+  NKFE_PAYOUT_API_KEY,
+  NKFE_PAYOUT_TIMEOUT_MS,
+  NKFE_TOKEN_DECIMALS,
+  NKFE_WITHDRAWAL_FEE_PERCENT,
+  NKFE_WITHDRAWAL_COOLDOWN_DAYS,
+  DEV_BYPASS_WITHDRAWAL_COOLDOWN,
   ENABLE_VERIFIED_MEMBER_DMS,
   FLAGS_EPHEMERAL,
   FARM_EVENT_DURATION_MINUTES,

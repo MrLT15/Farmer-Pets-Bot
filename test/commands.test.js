@@ -58,7 +58,11 @@ function createHandlers(overrides = {}) {
     config: {
       FARM_CHANNEL: "farm-channel",
       HEALTH_PORT: "8080",
-      LEADERBOARD_CHANNEL: "leaderboard-channel"
+      LEADERBOARD_CHANNEL: "leaderboard-channel",
+      NKFE_TOKEN_DECIMALS: 8,
+      NKFE_WITHDRAWAL_FEE_PERCENT: 0.03,
+      NKFE_WITHDRAWAL_COOLDOWN_DAYS: 14,
+      DEV_BYPASS_WITHDRAWAL_COOLDOWN: false
     },
     flagsEphemeral: FLAGS_EPHEMERAL,
     getAssets: async () => ({ walletAssets: [], stakedAssets: [], combinedAssets: [] }),
@@ -71,7 +75,7 @@ function createHandlers(overrides = {}) {
     handleDailyCheckIn: async interaction => interaction.reply({ content: "daily" }),
     handleRescue: async interaction => interaction.reply({ content: "rescue" }),
     payoutService: {
-      sendWithdrawal: async () => ({ ok: true, transactionId: "tx-default" })
+      executeNkfePayout: async () => ({ ok: true, transactionId: "tx-default" })
     },
     postWeeklyLeaderboardAndReset: async () => {},
     requestWithdrawal: async () => ({ ok: false, available: 0 }),
@@ -231,18 +235,28 @@ test("fp-withdraw sends NKFE to the verified wallet through payout service", asy
       return { payout_nkfe: 10 };
     },
     payoutService: {
-      sendWithdrawal: async payload => {
+      executeNkfePayout: async payload => {
         calls.push(["payout", payload]);
         return { ok: true, transactionId: "tx123" };
       }
     },
-    requestWithdrawal: async (discordId, wallet, amount, sendWithdrawal) => {
-      calls.push(["withdraw", discordId, wallet, amount]);
-      const payout = await sendWithdrawal({ discordId, wallet, amount });
+    requestWithdrawal: async (discordId, wallet, amount, executePayout, options) => {
+      calls.push(["withdraw", discordId, wallet, amount, options]);
+      const payout = await executePayout({
+        withdrawalId: 42,
+        toWallet: wallet,
+        grossUnits: 400000000n,
+        feeUnits: 12000000n,
+        netUnits: 388000000n,
+        discordId
+      });
       return {
         ok: true,
         remaining: 6,
         transactionId: payout.transactionId,
+        grossAmount: "4",
+        feeAmount: "0.12",
+        netAmount: "3.88",
         withdrawal: { id: 42, amount_nkfe: 4 }
       };
     }
@@ -254,12 +268,26 @@ test("fp-withdraw sends NKFE to the verified wallet through payout service", asy
   assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
   assert.deepEqual(calls, [
     ["balance", "discord-user"],
-    ["withdraw", "discord-user", "wallet.wam", 4],
-    ["payout", { discordId: "discord-user", wallet: "wallet.wam", amount: 4 }]
+    ["withdraw", "discord-user", "wallet.wam", 4, {
+      tokenDecimals: 8,
+      feePercent: 0.03,
+      cooldownDays: 14,
+      bypassCooldown: false
+    }],
+    ["payout", {
+      withdrawalId: 42,
+      toWallet: "wallet.wam",
+      grossUnits: 400000000n,
+      feeUnits: 12000000n,
+      netUnits: 388000000n,
+      discordId: "discord-user"
+    }]
   ]);
-  assert.match(interaction.editReplyPayloads.at(-1), /Sent \*\*4 \$NKFE\*\* to wallet \*\*wallet\.wam\*\*/);
-  assert.match(interaction.editReplyPayloads.at(-1), /Remaining bot balance: \*\*6 \$NKFE\*\*/);
-  assert.match(interaction.editReplyPayloads.at(-1), /Transaction: \*\*tx123\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Farmer Pets NKFE withdrawal sent/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Gross: \*\*4 \$NKFE\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Fee: \*\*0\.12 \$NKFE\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Net Sent: \*\*3\.88 \$NKFE\*\*/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Tx: \*\*tx123\*\*/);
 });
 
 test("fp-withdraw rejects missing wallets and over-balance amounts", async () => {
@@ -296,7 +324,7 @@ test("fp-withdraw reports automatic payout failures without deducting", async ()
 
   await handlers["fp-withdraw"](interaction);
 
-  assert.match(interaction.editReplyPayloads.at(-1), /Automatic withdrawal could not be completed/);
+  assert.match(interaction.editReplyPayloads.at(-1), /Withdrawal failed and your balance was not lost\/reverted/);
   assert.match(interaction.editReplyPayloads.at(-1), /not configured/);
 });
 
@@ -474,7 +502,11 @@ test("fp-health reports invalid health port configuration without crashing", asy
     config: {
       FARM_CHANNEL: "farm-channel",
       HEALTH_PORT: "HEALTH_PORT=3000",
-      LEADERBOARD_CHANNEL: "leaderboard-channel"
+      LEADERBOARD_CHANNEL: "leaderboard-channel",
+      NKFE_TOKEN_DECIMALS: 8,
+      NKFE_WITHDRAWAL_FEE_PERCENT: 0.03,
+      NKFE_WITHDRAWAL_COOLDOWN_DAYS: 14,
+      DEV_BYPASS_WITHDRAWAL_COOLDOWN: false
     }
   });
   const interaction = createMockInteraction();
