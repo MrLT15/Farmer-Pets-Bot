@@ -26,13 +26,12 @@ function createRescueHandlers({
   random = Math.random
 }) {
   async function handleRescue(interaction) {
+    await interaction.deferReply({ flags: flagsEphemeral });
+
     const farmEvent = getActiveFarmEvent();
 
     if (!farmEvent) {
-      await interaction.reply({
-        content: "No active farm emergency.",
-        flags: flagsEphemeral
-      });
+      await interaction.editReply("No active farm emergency.");
       return;
     }
 
@@ -42,10 +41,7 @@ function createRescueHandlers({
       const wallet = await getWallet(interaction.user.id);
 
       if (!wallet) {
-        await interaction.reply({
-          content: "You must verify your wallet first using `/verify`.",
-          flags: flagsEphemeral
-        });
+        await interaction.editReply("You must verify your wallet first using `/verify`.");
         return;
       }
 
@@ -54,10 +50,7 @@ function createRescueHandlers({
       const rescueBlockReason = getRescueBlockReason(farmEvent, interaction.user.id, Date.now(), profile);
 
       if (rescueBlockReason) {
-        await interaction.reply({
-          content: rescueBlockReason,
-          flags: flagsEphemeral
-        });
+        await interaction.editReply(rescueBlockReason);
         return;
       }
 
@@ -95,9 +88,8 @@ function createRescueHandlers({
         bonusBreakdown
       });
 
-      await interaction.reply({
-        embeds: [resultEmbed],
-        flags: flagsEphemeral
+      await interaction.editReply({
+        embeds: [resultEmbed]
       });
 
       await announceEmbedToEventTarget(farmEvent, resultEmbed, "Failed to announce Farmer Pets rescue result:");
@@ -127,33 +119,26 @@ function createRescueHandlers({
   }
 
   async function handleFarmHelp(interaction) {
+    await interaction.deferReply({ flags: flagsEphemeral });
+
     const farmEvent = getActiveFarmEvent();
 
     const helpBlockReason = getFarmHelpBlockReason(farmEvent, interaction.user.id);
 
     if (helpBlockReason) {
-      await interaction.reply({
-        content: helpBlockReason,
-        flags: flagsEphemeral
-      });
+      await interaction.editReply(helpBlockReason);
       return;
     }
 
     const farmHelpWallet = await getWallet(interaction.user.id);
 
     if (!farmHelpWallet) {
-      await interaction.reply({
-        content: "You must verify your wallet first using `/verify`.",
-        flags: flagsEphemeral
-      });
+      await interaction.editReply("You must verify your wallet first using `/verify`.");
       return;
     }
 
     if (!farmEvent.players?.has(interaction.user.id)) {
-      await interaction.reply({
-        content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
-        flags: flagsEphemeral
-      });
+      await interaction.editReply("Try **Rescue Pet** first, then you can help the farm after your attempt.");
       return;
     }
 
@@ -173,9 +158,8 @@ function createRescueHandlers({
       progressAdded
     });
 
-    await interaction.reply({
-      embeds: [helpEmbed],
-      flags: flagsEphemeral
+    await interaction.editReply({
+      embeds: [helpEmbed]
     });
 
     await announceEmbedToEventTarget(farmEvent, helpEmbed, "Failed to announce Farmer Pets farmhand help:");

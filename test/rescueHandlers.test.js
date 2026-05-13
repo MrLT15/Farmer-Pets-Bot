@@ -18,7 +18,15 @@ function createInteraction({ userId = "farmer", displayName = "Helpful Farmer" }
         }
       }
     },
+    deferReplyPayload: null,
+    editReplyPayloads: [],
     replyPayloads: [],
+    deferReply: async payload => {
+      interaction.deferReplyPayload = payload;
+    },
+    editReply: async payload => {
+      interaction.editReplyPayloads.push(payload);
+    },
     reply: async payload => {
       interaction.replyPayloads.push(payload);
     }
@@ -93,10 +101,8 @@ test("handleRescue replies with block reason without reserving attempt", async (
 
   await handlers.handleRescue(interaction);
 
-  assert.deepEqual(interaction.replyPayloads.at(-1), {
-    content: "No active farm emergency.",
-    flags: FLAGS_EPHEMERAL
-  });
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(interaction.editReplyPayloads.at(-1), "No active farm emergency.");
   assert.deepEqual(state.calls, []);
 });
 
@@ -110,10 +116,8 @@ test("handleRescue releases reserved attempt when wallet is missing", async () =
 
   assert.deepEqual(state.calls, []);
   assert.equal(state.farmEvent.players.has("farmer"), false);
-  assert.deepEqual(interaction.replyPayloads.at(-1), {
-    content: "You must verify your wallet first using `/verify`.",
-    flags: FLAGS_EPHEMERAL
-  });
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(interaction.editReplyPayloads.at(-1), "You must verify your wallet first using `/verify`.");
 });
 
 test("handleRescue records success, updates community progress, and announces result", async () => {
@@ -140,9 +144,9 @@ test("handleRescue records success, updates community progress, and announces re
     ["updateEvent", "Farm Rescue"],
     ["announceGoal", "Farm Rescue"]
   ]);
-  assert.equal(interaction.replyPayloads.at(-1).flags, FLAGS_EPHEMERAL);
-  assert.equal(interaction.replyPayloads.at(-1).embeds[0].type, "rescue");
-  assert.equal(interaction.replyPayloads.at(-1).embeds[0].payload.member.displayName, "Rescuer");
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(interaction.editReplyPayloads.at(-1).embeds[0].type, "rescue");
+  assert.equal(interaction.editReplyPayloads.at(-1).embeds[0].payload.member.displayName, "Rescuer");
   assert.equal(targetMessages.at(-1).embeds[0].type, "rescue");
 });
 
@@ -196,10 +200,8 @@ test("handleFarmHelp validates state and wallet before helping", async () => {
 
   await blocked.handlers.handleFarmHelp(blockedInteraction);
 
-  assert.deepEqual(blockedInteraction.replyPayloads.at(-1), {
-    content: "This farm emergency has already ended.",
-    flags: FLAGS_EPHEMERAL
-  });
+  assert.deepEqual(blockedInteraction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(blockedInteraction.editReplyPayloads.at(-1), "This farm emergency has already ended.");
 
   const missingWallet = createHandlers({
     getWallet: async () => null
@@ -208,10 +210,8 @@ test("handleFarmHelp validates state and wallet before helping", async () => {
 
   await missingWallet.handlers.handleFarmHelp(missingWalletInteraction);
 
-  assert.deepEqual(missingWalletInteraction.replyPayloads.at(-1), {
-    content: "You must verify your wallet first using `/verify`.",
-    flags: FLAGS_EPHEMERAL
-  });
+  assert.deepEqual(missingWalletInteraction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(missingWalletInteraction.editReplyPayloads.at(-1), "You must verify your wallet first using `/verify`.");
 });
 
 test("handleFarmHelp requires rescue attempt before help", async () => {
@@ -220,10 +220,8 @@ test("handleFarmHelp requires rescue attempt before help", async () => {
 
   await handlers.handleFarmHelp(interaction);
 
-  assert.deepEqual(interaction.replyPayloads.at(-1), {
-    content: "Try **Rescue Pet** first, then you can help the farm after your attempt.",
-    flags: FLAGS_EPHEMERAL
-  });
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(interaction.editReplyPayloads.at(-1), "Try **Rescue Pet** first, then you can help the farm after your attempt.");
 });
 
 test("handleFarmHelp records help, updates community events, and announces embed", async () => {
@@ -251,9 +249,9 @@ test("handleFarmHelp records help, updates community events, and announces embed
     ["updateEvent", "Farm Rescue"],
     ["announceGoal", "Farm Rescue"]
   ]);
-  assert.equal(interaction.replyPayloads.at(-1).flags, FLAGS_EPHEMERAL);
-  assert.equal(interaction.replyPayloads.at(-1).embeds[0].type, "help");
-  assert.equal(interaction.replyPayloads.at(-1).embeds[0].payload.member.displayName, "Helper");
-  assert.equal(interaction.replyPayloads.at(-1).embeds[0].payload.progressAdded, true);
+  assert.deepEqual(interaction.deferReplyPayload, { flags: FLAGS_EPHEMERAL });
+  assert.equal(interaction.editReplyPayloads.at(-1).embeds[0].type, "help");
+  assert.equal(interaction.editReplyPayloads.at(-1).embeds[0].payload.member.displayName, "Helper");
+  assert.equal(interaction.editReplyPayloads.at(-1).embeds[0].payload.progressAdded, true);
   assert.equal(targetMessages.at(-1).embeds[0].type, "help");
 });
