@@ -1,0 +1,220 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+const CONFIG_PATH = require.resolve("../src/config");
+const ENV_NAMES = [
+  "FARM_CHANNEL",
+  "FARM_CHANNEL_ID",
+  "LEADERBOARD_CHANNEL",
+  "LEADERBOARD_CHANNEL_ID",
+  "FARMER_VERIFIED_ROLE",
+  "FARMER_VERIFIED_ROLE_ID",
+  "FARMER_FOOD_ROLE",
+  "FARMER_FOOD_ROLE_ID",
+  "FARMER_WOOD_ROLE",
+  "FARMER_WOOD_ROLE_ID",
+  "FARMER_SILVER_ROLE",
+  "FARMER_SILVER_ROLE_ID",
+  "FARMER_TOOL_ROLE",
+  "FARMER_TOOL_ROLE_ID",
+  "FARMER_WORKING_FARM_ROLE",
+  "FARMER_WORKING_FARM_ROLE_ID",
+  "FARMER_FULL_FARM_ROLE",
+  "FARMER_FULL_FARM_ROLE_ID",
+  "ATOMIC_API",
+  "FARMER_PETS_API",
+  "CONTRACT_ACCOUNT",
+  "WAX_RPC_URL",
+  "NKFE_PAYOUT_SOURCE_WALLET",
+  "NKFE_TREASURY_PRIVATE_KEY",
+  "NKFE_TOKEN_CONTRACT",
+  "NKFE_TOKEN_SYMBOL",
+  "NKFE_TOKEN_PRECISION",
+  "NKFE_WITHDRAWAL_WEBHOOK_URL",
+  "NKFE_WITHDRAWAL_WEBHOOK_SECRET",
+  "NKFE_WITHDRAWAL_MEMO",
+  "NKFE_SYSTEM_ENABLED",
+  "NKFE_WITHDRAWALS_ENABLED",
+  "NKFE_PAYOUTS_ENABLED",
+  "NKFE_PAYOUT_API_URL",
+  "NKFE_PAYOUT_API_KEY",
+  "NKFE_PAYOUT_TIMEOUT_MS",
+  "NKFE_TOKEN_DECIMALS",
+  "NKFE_PAYOUT_DECIMAL_FALLBACKS",
+  "NKFE_WITHDRAWAL_FEE_PERCENT",
+  "NKFE_WITHDRAWAL_COOLDOWN_DAYS",
+  "DEV_BYPASS_WITHDRAWAL_COOLDOWN",
+  "ENABLE_VERIFIED_MEMBER_DMS",
+  "HEALTH_PORT",
+  "PORT",
+  "ENABLE_EVENT_THREADS",
+  "FARM_EVENT_DURATION_MINUTES",
+  "COMMUNITY_EVENT_DURATION_MINUTES"
+];
+
+function withConfigEnv(overrides, callback) {
+  const original = new Map(ENV_NAMES.map(name => [name, process.env[name]]));
+
+  for (const name of ENV_NAMES) {
+    delete process.env[name];
+  }
+
+  Object.assign(process.env, overrides);
+  delete require.cache[CONFIG_PATH];
+
+  try {
+    return callback(require(CONFIG_PATH));
+  } finally {
+    delete require.cache[CONFIG_PATH];
+
+    for (const name of ENV_NAMES) {
+      const value = original.get(name);
+
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  }
+}
+
+test("config uses stable Farmer Pets defaults when deployment overrides are absent", () => {
+  withConfigEnv({}, config => {
+    assert.equal(config.FARM_CHANNEL, "1270948980615938109");
+    assert.equal(config.LEADERBOARD_CHANNEL, "1499255526054170825");
+    assert.equal(config.FARMER_VERIFIED_ROLE, "1499240994397356112");
+    assert.equal(config.ROLES.verified.id, "1499240994397356112");
+    assert.equal(config.ROLES.fullFarm.id, "1499242342937399508");
+    assert.equal(config.ATOMIC_API, "https://wax.api.atomicassets.io/atomicassets/v1/assets");
+    assert.equal(config.FARMER_PETS_API, "https://pets-api-main.herokuapp.com");
+    assert.equal(config.CONTRACT_ACCOUNT, "farmerpetssc");
+    assert.equal(config.WAX_RPC_URL, "https://wax.greymass.com");
+    assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "roadisledger");
+    assert.equal(config.NKFE_TREASURY_PRIVATE_KEY, "");
+    assert.equal(config.NKFE_TOKEN_CONTRACT, "");
+    assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_TOKEN_PRECISION, 4);
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "");
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "");
+    assert.equal(config.NKFE_WITHDRAWAL_MEMO, "Farmer Pets $NKFE withdrawal");
+    assert.equal(config.NKFE_SYSTEM_ENABLED, true);
+    assert.equal(config.NKFE_WITHDRAWALS_ENABLED, true);
+    assert.equal(config.NKFE_PAYOUTS_ENABLED, true);
+    assert.equal(config.NKFE_PAYOUT_API_URL, "");
+    assert.equal(config.NKFE_PAYOUT_API_KEY, "");
+    assert.equal(config.NKFE_PAYOUT_TIMEOUT_MS, 15000);
+    assert.equal(config.NKFE_TOKEN_DECIMALS, 8);
+    assert.equal(config.NKFE_PAYOUT_DECIMAL_FALLBACKS, "4");
+    assert.equal(config.NKFE_WITHDRAWAL_FEE_PERCENT, 0.03);
+    assert.equal(config.NKFE_WITHDRAWAL_COOLDOWN_DAYS, 14);
+    assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, false);
+    assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, true);
+    assert.equal(config.HEALTH_PORT, undefined);
+    assert.equal(config.ENABLE_EVENT_THREADS, true);
+    assert.equal(config.FARM_EVENT_DURATION_MINUTES, 5);
+    assert.equal(config.FARM_EVENT_DURATION_MS, 5 * 60 * 1000);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MINUTES, 10);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MS, 10 * 60 * 1000);
+  });
+});
+
+test("config allows deployment environment to override channel, role, and API values", () => {
+  withConfigEnv({
+    FARM_CHANNEL_ID: "farm-channel-from-env",
+    LEADERBOARD_CHANNEL_ID: "leaderboard-channel-from-env",
+    FARMER_VERIFIED_ROLE_ID: "verified-role-from-env",
+    FARMER_FOOD_ROLE_ID: "food-role-from-env",
+    FARMER_WOOD_ROLE_ID: "wood-role-from-env",
+    FARMER_SILVER_ROLE_ID: "silver-role-from-env",
+    FARMER_TOOL_ROLE_ID: "tool-role-from-env",
+    FARMER_WORKING_FARM_ROLE_ID: "working-farm-role-from-env",
+    FARMER_FULL_FARM_ROLE_ID: "full-farm-role-from-env",
+    ATOMIC_API: "https://atomic.example.test/assets",
+    FARMER_PETS_API: "https://pets.example.test",
+    CONTRACT_ACCOUNT: "contractacct",
+    WAX_RPC_URL: "https://wax.example",
+    NKFE_PAYOUT_SOURCE_WALLET: "sourcewallet",
+    NKFE_TREASURY_PRIVATE_KEY: "private-key",
+    NKFE_TOKEN_CONTRACT: "nkfe.token",
+    NKFE_TOKEN_SYMBOL: "NKFE",
+    NKFE_TOKEN_PRECISION: "8",
+    NKFE_WITHDRAWAL_WEBHOOK_URL: "https://withdraw.example",
+    NKFE_WITHDRAWAL_WEBHOOK_SECRET: "secret",
+    NKFE_WITHDRAWAL_MEMO: "memo",
+    NKFE_SYSTEM_ENABLED: "false",
+    NKFE_WITHDRAWALS_ENABLED: "false",
+    NKFE_PAYOUTS_ENABLED: "false",
+    NKFE_PAYOUT_API_URL: "https://payout.example/nkfe",
+    NKFE_PAYOUT_API_KEY: "api-key",
+    NKFE_PAYOUT_TIMEOUT_MS: "20000",
+    NKFE_TOKEN_DECIMALS: "6",
+    NKFE_PAYOUT_DECIMAL_FALLBACKS: "4,8",
+    NKFE_WITHDRAWAL_FEE_PERCENT: "0.05",
+    NKFE_WITHDRAWAL_COOLDOWN_DAYS: "7",
+    DEV_BYPASS_WITHDRAWAL_COOLDOWN: "true",
+    HEALTH_PORT: "8080",
+    ENABLE_EVENT_THREADS: "false",
+    ENABLE_VERIFIED_MEMBER_DMS: "false",
+    FARM_EVENT_DURATION_MINUTES: "45",
+    COMMUNITY_EVENT_DURATION_MINUTES: "12"
+  }, config => {
+    assert.equal(config.FARM_CHANNEL, "farm-channel-from-env");
+    assert.equal(config.LEADERBOARD_CHANNEL, "leaderboard-channel-from-env");
+    assert.equal(config.FARMER_VERIFIED_ROLE, "verified-role-from-env");
+    assert.equal(config.ROLES.food.id, "food-role-from-env");
+    assert.equal(config.ROLES.wood.id, "wood-role-from-env");
+    assert.equal(config.ROLES.silver.id, "silver-role-from-env");
+    assert.equal(config.ROLES.tool.id, "tool-role-from-env");
+    assert.equal(config.ROLES.workingFarm.id, "working-farm-role-from-env");
+    assert.equal(config.ROLES.fullFarm.id, "full-farm-role-from-env");
+    assert.equal(config.ATOMIC_API, "https://atomic.example.test/assets");
+    assert.equal(config.FARMER_PETS_API, "https://pets.example.test");
+    assert.equal(config.CONTRACT_ACCOUNT, "contractacct");
+    assert.equal(config.WAX_RPC_URL, "https://wax.example");
+    assert.equal(config.NKFE_PAYOUT_SOURCE_WALLET, "sourcewallet");
+    assert.equal(config.NKFE_TREASURY_PRIVATE_KEY, "private-key");
+    assert.equal(config.NKFE_TOKEN_CONTRACT, "nkfe.token");
+    assert.equal(config.NKFE_TOKEN_SYMBOL, "NKFE");
+    assert.equal(config.NKFE_TOKEN_PRECISION, 8);
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_URL, "https://withdraw.example");
+    assert.equal(config.NKFE_WITHDRAWAL_WEBHOOK_SECRET, "secret");
+    assert.equal(config.NKFE_WITHDRAWAL_MEMO, "memo");
+    assert.equal(config.NKFE_SYSTEM_ENABLED, false);
+    assert.equal(config.NKFE_WITHDRAWALS_ENABLED, false);
+    assert.equal(config.NKFE_PAYOUTS_ENABLED, false);
+    assert.equal(config.NKFE_PAYOUT_API_URL, "https://payout.example/nkfe");
+    assert.equal(config.NKFE_PAYOUT_API_KEY, "api-key");
+    assert.equal(config.NKFE_PAYOUT_TIMEOUT_MS, 20000);
+    assert.equal(config.NKFE_TOKEN_DECIMALS, 6);
+    assert.equal(config.NKFE_PAYOUT_DECIMAL_FALLBACKS, "4,8");
+    assert.equal(config.NKFE_WITHDRAWAL_FEE_PERCENT, 0.05);
+    assert.equal(config.NKFE_WITHDRAWAL_COOLDOWN_DAYS, 7);
+    assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, true);
+    assert.equal(config.HEALTH_PORT, "8080");
+    assert.equal(config.ENABLE_EVENT_THREADS, false);
+    assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, false);
+    assert.equal(config.FARM_EVENT_DURATION_MINUTES, 45);
+    assert.equal(config.FARM_EVENT_DURATION_MS, 45 * 60 * 1000);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MINUTES, 12);
+    assert.equal(config.COMMUNITY_EVENT_DURATION_MS, 12 * 60 * 1000);
+  });
+});
+
+test("short channel and role environment names take precedence over ID aliases", () => {
+  withConfigEnv({
+    FARM_CHANNEL: "farm-channel-short",
+    FARM_CHANNEL_ID: "farm-channel-id",
+    LEADERBOARD_CHANNEL: "leaderboard-channel-short",
+    LEADERBOARD_CHANNEL_ID: "leaderboard-channel-id",
+    FARMER_VERIFIED_ROLE: "verified-role-short",
+    FARMER_VERIFIED_ROLE_ID: "verified-role-id",
+    PORT: "9090"
+  }, config => {
+    assert.equal(config.FARM_CHANNEL, "farm-channel-short");
+    assert.equal(config.LEADERBOARD_CHANNEL, "leaderboard-channel-short");
+    assert.equal(config.FARMER_VERIFIED_ROLE, "verified-role-short");
+    assert.equal(config.ROLES.verified.id, "verified-role-short");
+    assert.equal(config.HEALTH_PORT, "9090");
+  });
+});
