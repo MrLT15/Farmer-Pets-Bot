@@ -8,11 +8,18 @@ function toUnits(amount, decimals = 8) {
 }
 
 function formatTokenAmount(units, decimals = 8) {
+  const fixed = formatTokenAmountFixed(units, decimals);
+  if (!fixed.includes(".")) return fixed;
+
+  return fixed.replace(/\.?0+$/, "");
+}
+
+function formatTokenAmountFixed(units, decimals = 8) {
   const value = BigInt(units || 0);
   const divisor = 10n ** BigInt(decimals);
   const whole = value / divisor;
-  const fraction = (value % divisor).toString().padStart(decimals, "0").replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : whole.toString();
+  const fraction = (value % divisor).toString().padStart(decimals, "0");
+  return decimals > 0 ? `${whole}.${fraction}` : whole.toString();
 }
 
 function fromUnits(units, decimals = 8) {
@@ -92,7 +99,7 @@ function createPayoutService({
     const body = {
       toWallet,
       amountUnits: netUnits.toString(),
-      amount: formatTokenAmount(netUnits, tokenDecimals),
+      amount: formatTokenAmountFixed(netUnits, tokenDecimals),
       tokenIdentifier: "NKFE",
       memo: `Farmer Pets NKFE Withdrawal #${withdrawalId}`,
       metadata: {
@@ -156,6 +163,7 @@ module.exports = {
   calculateFeeUnits,
   createPayoutService,
   formatTokenAmount,
+  formatTokenAmountFixed,
   fromUnits,
   getPayoutTransactionId,
   toUnits

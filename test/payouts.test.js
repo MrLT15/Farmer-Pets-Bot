@@ -5,6 +5,7 @@ const {
   calculateFeeUnits,
   createPayoutService,
   formatTokenAmount,
+  formatTokenAmountFixed,
   toUnits
 } = require("../src/services/payouts");
 
@@ -33,6 +34,7 @@ test("token unit helpers format decimals and fees", () => {
   assert.equal(gross, 400000000n);
   assert.equal(fee, 12000000n);
   assert.equal(formatTokenAmount(gross - fee, 8), "3.88");
+  assert.equal(formatTokenAmountFixed(gross - fee, 8), "3.88000000");
 });
 
 test("executeNkfePayout reports missing payout API URL", async () => {
@@ -88,7 +90,7 @@ test("executeNkfePayout posts RoA-style payload and returns transaction id", asy
   assert.deepEqual(JSON.parse(requests[0].options.body), {
     toWallet: "abc.wam",
     amountUnits: "388000000",
-    amount: "3.88",
+    amount: "3.88000000",
     tokenIdentifier: "NKFE",
     memo: "Farmer Pets NKFE Withdrawal #42",
     metadata: {
