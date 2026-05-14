@@ -43,6 +43,13 @@ Copy `.env.example` into your deployment environment and set the required values
 
 Short names such as `FARM_CHANNEL`, `LEADERBOARD_CHANNEL`, and `FARMER_VERIFIED_ROLE` are also supported and take precedence over their `_ID` aliases.
 
+For Render, add these as separate environment variables in the Render dashboard rather than leaving them implicit defaults:
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `FARMER_PETS_INSTANCE_LOCK_ENABLED` | `false` | Allows Render rolling deploys to overlap the old and new bot process without the new deploy exiting because the old process still holds the advisory lock. |
+| `NKFE_PAYOUT_DECIMAL_FALLBACKS` | `4` | Retries payout API `nkfe_amount_mismatch` responses using the token precision expected by the current $NKFE payout service. |
+
 If `/fp-withdraw` says automatic withdrawals are not configured, set `NKFE_PAYOUT_API_URL` in the deployed Render environment (and `NKFE_PAYOUT_API_KEY` if your payout service requires it). Run `npm run doctor -- --skip-db` in the deployed environment to confirm the bot can see the payout API URL.
 
 ## Discord permissions
