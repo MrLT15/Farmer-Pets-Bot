@@ -40,6 +40,7 @@ const ENV_NAMES = [
   "NKFE_PAYOUT_API_KEY",
   "NKFE_PAYOUT_TIMEOUT_MS",
   "NKFE_TOKEN_DECIMALS",
+  "NKFE_PAYOUT_DECIMAL_FALLBACKS",
   "NKFE_WITHDRAWAL_FEE_PERCENT",
   "NKFE_WITHDRAWAL_COOLDOWN_DAYS",
   "DEV_BYPASS_WITHDRAWAL_COOLDOWN",
@@ -104,6 +105,7 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.NKFE_PAYOUT_API_KEY, "");
     assert.equal(config.NKFE_PAYOUT_TIMEOUT_MS, 15000);
     assert.equal(config.NKFE_TOKEN_DECIMALS, 8);
+    assert.equal(config.NKFE_PAYOUT_DECIMAL_FALLBACKS, "4");
     assert.equal(config.NKFE_WITHDRAWAL_FEE_PERCENT, 0.03);
     assert.equal(config.NKFE_WITHDRAWAL_COOLDOWN_DAYS, 14);
     assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, false);
@@ -147,6 +149,7 @@ test("config allows deployment environment to override channel, role, and API va
     NKFE_PAYOUT_API_KEY: "api-key",
     NKFE_PAYOUT_TIMEOUT_MS: "20000",
     NKFE_TOKEN_DECIMALS: "6",
+    NKFE_PAYOUT_DECIMAL_FALLBACKS: "4,8",
     NKFE_WITHDRAWAL_FEE_PERCENT: "0.05",
     NKFE_WITHDRAWAL_COOLDOWN_DAYS: "7",
     DEV_BYPASS_WITHDRAWAL_COOLDOWN: "true",
@@ -184,6 +187,7 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.NKFE_PAYOUT_API_KEY, "api-key");
     assert.equal(config.NKFE_PAYOUT_TIMEOUT_MS, 20000);
     assert.equal(config.NKFE_TOKEN_DECIMALS, 6);
+    assert.equal(config.NKFE_PAYOUT_DECIMAL_FALLBACKS, "4,8");
     assert.equal(config.NKFE_WITHDRAWAL_FEE_PERCENT, 0.05);
     assert.equal(config.NKFE_WITHDRAWAL_COOLDOWN_DAYS, 7);
     assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, true);

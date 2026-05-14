@@ -35,6 +35,7 @@ Copy `.env.example` into your deployment environment and set the required values
 | `NKFE_PAYOUT_API_KEY` | Optional | Bearer token sent to the payout API when configured. |
 | `NKFE_PAYOUT_TIMEOUT_MS` | Optional | Payout API timeout. Defaults to `15000`. |
 | `NKFE_TOKEN_DECIMALS` | Optional | Decimal places used when converting whole in-bot NKFE balances to payout units. Defaults to `8`. |
+| `NKFE_PAYOUT_DECIMAL_FALLBACKS` | Optional | Comma-separated decimal precisions to retry if the payout API returns `nkfe_amount_mismatch`. Defaults to `4`. |
 | `NKFE_WITHDRAWAL_FEE_PERCENT` | Optional | Fee applied before sending to the payout API. Defaults to `0.03` (3%). |
 | `NKFE_WITHDRAWAL_COOLDOWN_DAYS`, `DEV_BYPASS_WITHDRAWAL_COOLDOWN` | Optional | Completed-withdrawal cooldown. Defaults to `14` days; dev bypass defaults to `false`. |
 | `WAX_RPC_URL`, `NKFE_TREASURY_PRIVATE_KEY`, `NKFE_WITHDRAWAL_WEBHOOK_URL` | Legacy only | Retained for compatibility, but `/fp-withdraw` now uses `NKFE_PAYOUT_API_URL` instead of a bot-held private key or webhook payout. |

@@ -44,6 +44,30 @@ function getPayoutTransactionId(result = {}) {
   return result.txId || result.transactionId || result.tx_id || result.transaction_id || null;
 }
 
+function getPayoutDecimalAttempts(config = {}, tokenDecimals = 8) {
+  const attempts = [Number(tokenDecimals)];
+  const configuredFallbacks = String(config.NKFE_PAYOUT_DECIMAL_FALLBACKS || "4")
+    .split(",")
+    .map(value => Number(value.trim()))
+    .filter(value => Number.isInteger(value) && value >= 0);
+
+  for (const decimals of configuredFallbacks) {
+    if (!attempts.includes(decimals)) attempts.push(decimals);
+  }
+
+  return attempts;
+}
+
+function rescaleUnits(units, fromDecimals, toDecimals) {
+  if (Number(fromDecimals) === Number(toDecimals)) return BigInt(units);
+  return toUnits(formatTokenAmount(units, fromDecimals), toDecimals);
+}
+
+function getPayoutErrorCode(error) {
+  const message = error?.message || "";
+  return error?.payoutCode || (message.includes("nkfe_amount_mismatch") ? "nkfe_amount_mismatch" : null);
+}
+
 function normalizePayoutError(error) {
   if (error?.name === "AbortError") return "NKFE payout API timed out.";
   return error?.message || "NKFE payout API request failed.";
@@ -96,41 +120,59 @@ function createPayoutService({
       ? setTimeout(() => controller.abort(), timeoutMs)
       : null;
 
-    const body = {
-      toWallet,
-      amountUnits: netUnits.toString(),
-      amount: formatTokenAmountFixed(netUnits, tokenDecimals),
-      tokenIdentifier: "NKFE",
-      memo: `Farmer Pets NKFE Withdrawal #${withdrawalId}`,
-      metadata: {
-        withdrawalId,
-        discordId,
-        grossUnits: grossUnits.toString(),
-        feeUnits: feeUnits.toString(),
-        source: "farmer_pets"
-      }
-    };
-
     try {
-      const response = await fetchFn(config.NKFE_PAYOUT_API_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(config.NKFE_PAYOUT_API_KEY ? { authorization: `Bearer ${config.NKFE_PAYOUT_API_KEY}` } : {})
-        },
-        body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {})
-      });
+      let lastError = null;
 
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result.error || result.message || `NKFE payout API returned HTTP ${response.status}.`);
-      }
-      if (result.ok === false) {
-        throw new Error(result.error || result.message || "NKFE payout API rejected the withdrawal.");
+      for (const payoutDecimals of getPayoutDecimalAttempts(config, tokenDecimals)) {
+        const payoutNetUnits = rescaleUnits(netUnits, tokenDecimals, payoutDecimals);
+        const payoutGrossUnits = rescaleUnits(grossUnits, tokenDecimals, payoutDecimals);
+        const payoutFeeUnits = rescaleUnits(feeUnits, tokenDecimals, payoutDecimals);
+        const body = {
+          toWallet,
+          amountUnits: payoutNetUnits.toString(),
+          amount: formatTokenAmountFixed(payoutNetUnits, payoutDecimals),
+          tokenIdentifier: "NKFE",
+          memo: `Farmer Pets NKFE Withdrawal #${withdrawalId}`,
+          metadata: {
+            withdrawalId,
+            discordId,
+            grossUnits: payoutGrossUnits.toString(),
+            feeUnits: payoutFeeUnits.toString(),
+            source: "farmer_pets"
+          }
+        };
+
+        try {
+          const response = await fetchFn(config.NKFE_PAYOUT_API_URL, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(config.NKFE_PAYOUT_API_KEY ? { authorization: `Bearer ${config.NKFE_PAYOUT_API_KEY}` } : {})
+            },
+            body: JSON.stringify(body),
+            ...(controller ? { signal: controller.signal } : {})
+          });
+
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const error = new Error(result.error || result.message || `NKFE payout API returned HTTP ${response.status}.`);
+            error.payoutCode = result.error || result.code || null;
+            throw error;
+          }
+          if (result.ok === false) {
+            const error = new Error(result.error || result.message || "NKFE payout API rejected the withdrawal.");
+            error.payoutCode = result.error || result.code || null;
+            throw error;
+          }
+
+          return { ok: true, transactionId: getPayoutTransactionId(result), response: result };
+        } catch (error) {
+          lastError = error;
+          if (getPayoutErrorCode(error) !== "nkfe_amount_mismatch") throw error;
+        }
       }
 
-      return { ok: true, transactionId: getPayoutTransactionId(result), response: result };
+      throw lastError || new Error("NKFE payout API request failed.");
     } catch (error) {
       throw new Error(normalizePayoutError(error));
     } finally {
@@ -165,6 +207,8 @@ module.exports = {
   formatTokenAmount,
   formatTokenAmountFixed,
   fromUnits,
+  getPayoutDecimalAttempts,
   getPayoutTransactionId,
+  rescaleUnits,
   toUnits
 };
