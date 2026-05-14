@@ -48,6 +48,7 @@ const ENV_NAMES = [
   "HEALTH_PORT",
   "PORT",
   "ENABLE_EVENT_THREADS",
+  "FARMER_PETS_INSTANCE_LOCK_ENABLED",
   "FARM_EVENT_DURATION_MINUTES",
   "COMMUNITY_EVENT_DURATION_MINUTES"
 ];
@@ -112,6 +113,7 @@ test("config uses stable Farmer Pets defaults when deployment overrides are abse
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, true);
     assert.equal(config.HEALTH_PORT, undefined);
     assert.equal(config.ENABLE_EVENT_THREADS, true);
+    assert.equal(config.FARMER_PETS_INSTANCE_LOCK_ENABLED, false);
     assert.equal(config.FARM_EVENT_DURATION_MINUTES, 5);
     assert.equal(config.FARM_EVENT_DURATION_MS, 5 * 60 * 1000);
     assert.equal(config.COMMUNITY_EVENT_DURATION_MINUTES, 10);
@@ -155,6 +157,7 @@ test("config allows deployment environment to override channel, role, and API va
     DEV_BYPASS_WITHDRAWAL_COOLDOWN: "true",
     HEALTH_PORT: "8080",
     ENABLE_EVENT_THREADS: "false",
+    FARMER_PETS_INSTANCE_LOCK_ENABLED: "true",
     ENABLE_VERIFIED_MEMBER_DMS: "false",
     FARM_EVENT_DURATION_MINUTES: "45",
     COMMUNITY_EVENT_DURATION_MINUTES: "12"
@@ -193,6 +196,7 @@ test("config allows deployment environment to override channel, role, and API va
     assert.equal(config.DEV_BYPASS_WITHDRAWAL_COOLDOWN, true);
     assert.equal(config.HEALTH_PORT, "8080");
     assert.equal(config.ENABLE_EVENT_THREADS, false);
+    assert.equal(config.FARMER_PETS_INSTANCE_LOCK_ENABLED, true);
     assert.equal(config.ENABLE_VERIFIED_MEMBER_DMS, false);
     assert.equal(config.FARM_EVENT_DURATION_MINUTES, 45);
     assert.equal(config.FARM_EVENT_DURATION_MS, 45 * 60 * 1000);

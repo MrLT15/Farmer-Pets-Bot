@@ -179,6 +179,7 @@ function createBotApp({
       commands: commandDefinitions,
       initDatabase: db.initDatabase,
       acquireInstanceLock: db.acquireInstanceLock,
+      instanceLockEnabled: config.FARMER_PETS_INSTANCE_LOCK_ENABLED,
       scheduleEvent,
       postWeeklyLeaderboardAndReset: playerStatsService.postWeeklyLeaderboardAndReset
     });

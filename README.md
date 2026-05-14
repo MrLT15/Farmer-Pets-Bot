@@ -26,6 +26,7 @@ Copy `.env.example` into your deployment environment and set the required values
 | `FARMER_*_ROLE_ID` | Recommended | Role IDs used by `/fp-roles` and event pings. Defaults to Farmer Pets production roles. |
 | `HEALTH_PORT` or `PORT` | Optional | Starts a lightweight HTTP health endpoint at `/health` for web-service hosts. |
 | `ENABLE_EVENT_THREADS` | Optional | Defaults to `true`; set to `false` if the bot should skip per-event Discord thread creation. |
+| `FARMER_PETS_INSTANCE_LOCK_ENABLED` | Optional | Defaults to `false` for Render rolling deploy safety. Set to `true` only on hosts that never overlap old/new bot processes. |
 | `ENABLE_VERIFIED_MEMBER_DMS` | Optional | Defaults to `true`; DMs verified non-bot members when a normal rescue or Commander event starts. |
 | `FARM_EVENT_DURATION_MINUTES` | Optional | Defaults to `5`; controls how long normal rescue events stay open. |
 | `COMMUNITY_EVENT_DURATION_MINUTES` | Optional | Defaults to `10`; controls Commander-started community event duration. |
@@ -105,7 +106,7 @@ Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP serv
 
 ## Troubleshooting Discord interactions
 
-If Render logs `DiscordAPIError[10062]: Unknown interaction` at `deferReply`, Discord has already invalidated that interaction token before the bot could acknowledge it. This is separate from the payout API itself. The bot pre-acknowledges `/fp-withdraw` in the interaction router and logs a concise warning instead of retrying an invalid token. At startup the bot also takes a PostgreSQL advisory lock so duplicate Farmer Pets instances using the same database will fail fast instead of both receiving Discord interactions. If it continues after deploys, check that only one Render service/worker is configured with the bot token, stop any old duplicate services, and ask users to retry after the active deploy is fully live.
+If Render logs `DiscordAPIError[10062]: Unknown interaction` at `deferReply`, Discord has already invalidated that interaction token before the bot could acknowledge it. This is separate from the payout API itself. The bot pre-acknowledges `/fp-withdraw` in the interaction router and logs a concise warning instead of retrying an invalid token. If it continues after deploys, check that only one Render service/worker is configured with the bot token, stop any old duplicate services, and ask users to retry after the active deploy is fully live. `FARMER_PETS_INSTANCE_LOCK_ENABLED` can enforce a PostgreSQL advisory lock, but it defaults to `false` because Render rolling deploys briefly overlap old and new processes.
 
 ## Deployment diagnostics
 

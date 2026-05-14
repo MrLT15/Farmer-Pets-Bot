@@ -66,6 +66,7 @@ function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {
       DATABASE_URL: "postgres://user:password@host/db",
       HEALTH_PORT: "8080",
       ENABLE_EVENT_THREADS: true,
+      FARMER_PETS_INSTANCE_LOCK_ENABLED: false,
       FARM_CHANNEL: "farm-channel",
       LEADERBOARD_CHANNEL: "leaderboard-channel",
       FARMER_VERIFIED_ROLE: "verified-role",
@@ -204,6 +205,7 @@ test("createBotApp wires runtime dependencies and logs in with configured token"
   assert.equal(captures.readyHandlerOptions.guildId, "guild-id");
   assert.deepEqual(captures.readyHandlerOptions.commands, [{ name: "fp-test" }]);
   assert.equal(typeof captures.readyHandlerOptions.acquireInstanceLock, "function");
+  assert.equal(captures.readyHandlerOptions.instanceLockEnabled, false);
   assert.equal(captures.farmEventOptions.farmChannelId, "farm-channel");
   assert.equal(captures.farmEventOptions.farmerVerifiedRoleId, "verified-role");
   assert.equal(captures.farmEventOptions.enableEventThreads, true);
@@ -218,6 +220,15 @@ test("createBotApp wires runtime dependencies and logs in with configured token"
   assert.deepEqual(Object.keys(processLike.handlers).sort(), ["SIGINT", "SIGTERM"]);
 });
 
+test("createBotApp passes enabled instance lock setting to startup", async () => {
+  const { app, captures } = createBotAppFixture({
+    config: { FARMER_PETS_INSTANCE_LOCK_ENABLED: true }
+  });
+
+  await app.startBot();
+
+  assert.equal(captures.readyHandlerOptions.instanceLockEnabled, true);
+});
 
 
 test("cancelActiveFarmEvent ends active events, clears timers, and schedules the next event", async () => {
