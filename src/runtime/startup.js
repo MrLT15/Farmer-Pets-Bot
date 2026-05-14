@@ -8,6 +8,7 @@ function registerClientReadyHandler({
   guildId,
   commands,
   initDatabase,
+  acquireInstanceLock = async () => true,
   scheduleEvent,
   postWeeklyLeaderboardAndReset,
   logger = console,
@@ -18,6 +19,13 @@ function registerClientReadyHandler({
 
     try {
       await initDatabase();
+
+      const lockAcquired = await acquireInstanceLock();
+      if (!lockAcquired) {
+        throw new Error(
+          "Another Farmer Pets Bot instance is already running. Stop duplicate Render services/workers using this Discord token."
+        );
+      }
 
       const rest = new REST({ version: "10" }).setToken(token);
 

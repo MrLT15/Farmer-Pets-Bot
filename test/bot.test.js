@@ -80,6 +80,7 @@ function createBotAppFixture({ config: configOverrides = {}, db: dbOverrides = {
       getPayoutRows: async () => [],
       getWallet: async () => "wallet.wam",
       initDatabase: async () => {},
+      acquireInstanceLock: async () => true,
       recordRescue: async () => ({}),
       resetPayouts: async () => {},
       ...dbOverrides
@@ -202,6 +203,7 @@ test("createBotApp wires runtime dependencies and logs in with configured token"
   assert.equal(captures.readyHandlerOptions.clientId, "client-id");
   assert.equal(captures.readyHandlerOptions.guildId, "guild-id");
   assert.deepEqual(captures.readyHandlerOptions.commands, [{ name: "fp-test" }]);
+  assert.equal(typeof captures.readyHandlerOptions.acquireInstanceLock, "function");
   assert.equal(captures.farmEventOptions.farmChannelId, "farm-channel");
   assert.equal(captures.farmEventOptions.farmerVerifiedRoleId, "verified-role");
   assert.equal(captures.farmEventOptions.enableEventThreads, true);

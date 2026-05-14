@@ -104,7 +104,7 @@ Set `HEALTH_PORT` (or platform-provided `PORT`) to start a lightweight HTTP serv
 
 ## Troubleshooting Discord interactions
 
-If Render logs `DiscordAPIError[10062]: Unknown interaction` at `deferReply`, Discord has already invalidated that interaction token before the bot could acknowledge it. This is separate from the payout API itself. The bot now pre-acknowledges `/fp-withdraw` in the interaction router and logs a concise warning instead of retrying an invalid token. If it continues after deploys, check that only one Render service/worker is logged in with the bot token and ask users to retry the slash command after the new deploy is fully live.
+If Render logs `DiscordAPIError[10062]: Unknown interaction` at `deferReply`, Discord has already invalidated that interaction token before the bot could acknowledge it. This is separate from the payout API itself. The bot pre-acknowledges `/fp-withdraw` in the interaction router and logs a concise warning instead of retrying an invalid token. At startup the bot also takes a PostgreSQL advisory lock so duplicate Farmer Pets instances using the same database will fail fast instead of both receiving Discord interactions. If it continues after deploys, check that only one Render service/worker is configured with the bot token, stop any old duplicate services, and ask users to retry after the active deploy is fully live.
 
 ## Deployment diagnostics
 

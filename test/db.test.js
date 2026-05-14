@@ -33,6 +33,7 @@ test("createDatabase exposes the database helper surface", () => {
   const db = createDatabase(createMockPool());
 
   assert.deepEqual(Object.keys(db).sort(), [
+    "acquireInstanceLock",
     "awardCommunityEventPayouts",
     "awardCommunityMilestoneReward",
     "clearPayoutsForDiscordIds",
@@ -48,6 +49,7 @@ test("createDatabase exposes the database helper surface", () => {
     "initDatabase",
     "recordDailyCheckIn",
     "recordRescue",
+    "releaseInstanceLock",
     "requestWithdrawal",
     "resetPayouts",
     "resetWeeklyStats",
@@ -55,6 +57,50 @@ test("createDatabase exposes the database helper surface", () => {
   ].sort());
 });
 
+
+test("instance lock uses a held PostgreSQL advisory lock until close", async () => {
+  const lockClient = {
+    queries: [],
+    releaseCalls: 0,
+    async query(sql) {
+      this.queries.push(sql);
+      return { rows: [{ locked: true }] };
+    },
+    release() {
+      this.releaseCalls++;
+    }
+  };
+  const pool = createMockPool();
+  pool.connect = async () => lockClient;
+  const db = createDatabase(pool);
+
+  assert.equal(await db.acquireInstanceLock(), true);
+  assert.equal(await db.acquireInstanceLock(), true);
+  await db.close();
+
+  assert.equal(lockClient.queries[0], "SELECT pg_try_advisory_lock(1903202401) AS locked;");
+  assert.equal(lockClient.queries[1], "SELECT pg_advisory_unlock(1903202401);");
+  assert.equal(lockClient.releaseCalls, 1);
+  assert.equal(pool.endCalls, 1);
+});
+
+test("instance lock reports duplicate bot processes without holding a client", async () => {
+  const lockClient = {
+    releaseCalls: 0,
+    async query() {
+      return { rows: [{ locked: false }] };
+    },
+    release() {
+      this.releaseCalls++;
+    }
+  };
+  const pool = createMockPool();
+  pool.connect = async () => lockClient;
+  const db = createDatabase(pool);
+
+  assert.equal(await db.acquireInstanceLock(), false);
+  assert.equal(lockClient.releaseCalls, 1);
+});
 
 
 test("close ends the injected pool when supported", async () => {

@@ -178,6 +178,7 @@ function createBotApp({
       guildId: config.GUILD_ID,
       commands: commandDefinitions,
       initDatabase: db.initDatabase,
+      acquireInstanceLock: db.acquireInstanceLock,
       scheduleEvent,
       postWeeklyLeaderboardAndReset: playerStatsService.postWeeklyLeaderboardAndReset
     });

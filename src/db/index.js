@@ -9,7 +9,39 @@ const pool = new Pool({
 });
 
 function createDatabase(dbPool, { logger = console } = {}) {
+  let instanceLockClient = null;
+
+  async function acquireInstanceLock() {
+    if (instanceLockClient) return true;
+
+    if (typeof dbPool.connect !== "function") return true;
+
+    const client = await dbPool.connect();
+    const result = await client.query("SELECT pg_try_advisory_lock(1903202401) AS locked;");
+
+    if (!result.rows[0]?.locked) {
+      client.release?.();
+      return false;
+    }
+
+    instanceLockClient = client;
+    return true;
+  }
+
+  async function releaseInstanceLock() {
+    if (!instanceLockClient) return;
+
+    try {
+      await instanceLockClient.query("SELECT pg_advisory_unlock(1903202401);");
+    } finally {
+      instanceLockClient.release?.();
+      instanceLockClient = null;
+    }
+  }
+
   async function close() {
+    await releaseInstanceLock();
+
     if (typeof dbPool.end === "function") {
       await dbPool.end();
     }
@@ -623,6 +655,7 @@ function createDatabase(dbPool, { logger = console } = {}) {
 
 
   return {
+    acquireInstanceLock,
     awardCommunityEventPayouts,
     awardCommunityMilestoneReward,
     clearPayoutsForDiscordIds,
@@ -638,6 +671,7 @@ function createDatabase(dbPool, { logger = console } = {}) {
     initDatabase,
     recordDailyCheckIn,
     recordRescue,
+    releaseInstanceLock,
     requestWithdrawal,
     resetPayouts,
     resetWeeklyStats,
